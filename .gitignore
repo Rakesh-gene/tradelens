@@ -1,0 +1,9 @@
+src/frontend/node_modules/
+src/frontend/.npm-cache/
+src/frontend/dist/
+src/backend/.venv/
+__pycache__/
+*.py[cod]
+.chrome-preview/
+.edge-preview/
+.DS_Store

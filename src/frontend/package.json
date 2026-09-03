@@ -1,0 +1,18 @@
+{
+  "name": "tradelens-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5004",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5004"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "vite": "6.4.1"
+  }
+}
