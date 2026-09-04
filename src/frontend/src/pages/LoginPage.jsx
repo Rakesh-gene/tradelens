@@ -1,24 +1,8 @@
 import AuthForm from '../components/AuthForm.jsx'
 
+import React from 'react'
+
 const navItems = ['Screens', 'Breakouts', 'Market', 'Learn']
-
-const accountBullets = [
-  'Free account unlocks the private watchlist',
-  'Email link or Google sign-in supported',
-  'Published methodology, no hidden screeners',
-]
-
-const loginSteps = [
-  'Enter your email address',
-  'Choose password or sign-in link',
-  'Open the live market screen',
-]
-
-const stats = [
-  { value: '1 in 3', label: 'Winning trades' },
-  { value: 'After close', label: 'Fresh scans' },
-  { value: 'No tips', label: 'Only rules' },
-]
 
 const loginFields = [
   {
@@ -37,7 +21,7 @@ const loginFields = [
   },
 ]
 
-export default function LoginPage() {
+export default function LoginPage({ onAuthenticated }) {
   return (
     <main className="login-shell">
       <section className="left-panel" aria-hidden="true">
@@ -66,39 +50,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="search-card">
-          <div className="search-row">
-            <span className="search-pill">Risk first, always</span>
-            <span className="search-input">Search any stock</span>
-          </div>
-          <p className="search-note">
-            Every liquid stock, measured after the close.
-          </p>
-        </div>
-
-        <div className="bullet-grid">
-          {accountBullets.map((item) => (
-            <article key={item} className="bullet-card">
-              <span className="bullet-dot" />
-              <p>{item}</p>
-            </article>
-          ))}
-        </div>
-
-        <footer className="left-footer">
-          <div>
-            <p className="footer-label">Loading today&apos;s scan…</p>
-            <strong>The breakout record, updated after each close</strong>
-          </div>
-          <ul className="stat-list" aria-label="Product highlights">
-            {stats.map((stat) => (
-              <li key={stat.label}>
-                <strong>{stat.value}</strong>
-                <span>{stat.label}</span>
-              </li>
-            ))}
-          </ul>
-        </footer>
       </section>
 
       <section className="right-panel" aria-label="Login form">
@@ -127,19 +78,19 @@ export default function LoginPage() {
               </a>
             </div>
           }
-          onSubmit={async () => {
-            await new Promise((resolve) => window.setTimeout(resolve, 300))
+          onSubmit={async (values) => {
+            const response = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(values),
+            })
+            const payload = await response.json()
+            if (!response.ok) {
+              throw new Error(payload.error || 'Unable to sign in')
+            }
+            onAuthenticated(payload.accessToken, payload.user)
           }}
         />
-
-        <div className="step-card">
-          {loginSteps.map((step, index) => (
-            <div key={step} className="step-row">
-              <span>{index + 1}</span>
-              <p>{step}</p>
-            </div>
-          ))}
-        </div>
 
         <p className="legal-copy">
           Not financial advice. Tradelens is a stock screening and market

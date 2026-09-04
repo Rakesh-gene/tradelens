@@ -1,5 +1,7 @@
 import AuthForm from '../components/AuthForm.jsx'
 
+import React from 'react'
+
 const signupFields = [
   {
     name: 'email',
@@ -59,7 +61,7 @@ export default function SignupPage() {
           switchText: 'Already have an account?',
           successMessage: 'Registration completed.',
         }}
-        actionLabel="Continue with Google"
+        actionLabel="Email sign-up link"
         altActionLabel="Sign in"
         altActionHref="/"
         fields={signupFields}

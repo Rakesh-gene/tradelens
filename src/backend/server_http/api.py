@@ -26,6 +26,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             return {}
         return json.loads(raw_body.decode("utf-8"))
 
+    def _access_token(self) -> str:
+        authorization = self.headers.get("Authorization", "")
+        if not authorization.startswith("Bearer "):
+            raise ValueError("Authorization bearer token is required")
+        return authorization.removeprefix("Bearer ").strip()
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
         if path == "/api/health":
@@ -33,6 +39,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"status": "ok", "service": "tradelens-backend"},
             )
+            return
+        if path == "/api/auth/me":
+            try:
+                user = self.service.current_user(self._access_token())
+            except ValueError as exc:
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"user": user})
             return
         if path == "/":
             self._send_json(
@@ -44,11 +58,27 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
-        if path != "/api/register":
+        if path not in {"/api/register", "/api/login"}:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         try:
             payload = self._read_json()
+            if path == "/api/login":
+                authentication = self.service.login(
+                    payload.get("email", ""), payload.get("password", "")
+                )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "accessToken": authentication.access_token,
+                        "user": {
+                            "id": authentication.user_id,
+                            "email": authentication.email,
+                            "isAdmin": authentication.is_admin,
+                        },
+                    },
+                )
+                return
             registration = self.service.register(
                 payload.get("email", ""),
                 payload.get("password", ""),

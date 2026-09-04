@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from typing import Protocol
 
-from auth.models import RegistrationResult
+from auth.jwt import decode_access_token, issue_access_token
+from auth.models import AuthenticationResult, RegistrationResult
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -18,8 +20,9 @@ class UserRepository(Protocol):
 
 
 class AuthService:
-    def __init__(self, user_repository: UserRepository) -> None:
+    def __init__(self, user_repository: UserRepository, jwt_secret: str) -> None:
         self._user_repository = user_repository
+        self._jwt_secret = jwt_secret
 
     def register(self, email: str, password: str, confirm_password: str) -> RegistrationResult:
         normalized_email = email.strip().lower()
@@ -34,6 +37,24 @@ class AuthService:
         password_hash = self._hash_password(password)
         user = self._user_repository.create_user(normalized_email, password_hash)
         return RegistrationResult(user_id=user["id"], email=user["email"])
+
+    def login(self, email: str, password: str) -> AuthenticationResult:
+        user = self._user_repository.get_by_email(email.strip().lower())
+        if user is None or not hmac.compare_digest(user["password_hash"], self._hash_password(password)):
+            raise ValueError("Invalid email or password")
+        return AuthenticationResult(
+            access_token=issue_access_token(user, self._jwt_secret),
+            user_id=user["id"],
+            email=user["email"],
+            is_admin=bool(user.get("is_admin", False)),
+        )
+
+    def current_user(self, access_token: str) -> dict[str, object]:
+        claims = decode_access_token(access_token, self._jwt_secret)
+        user = self._user_repository.get_by_email(str(claims["email"]))
+        if user is None or str(user["id"]) != str(claims["sub"]):
+            raise ValueError("Invalid or expired access token")
+        return {"id": user["id"], "email": user["email"], "is_admin": bool(user.get("is_admin", False))}
 
     @staticmethod
     def _hash_password(password: str) -> str:

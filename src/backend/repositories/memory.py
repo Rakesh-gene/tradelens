@@ -15,6 +15,7 @@ class InMemoryUserRepository:
             "id": str(uuid4()),
             "email": email.lower(),
             "password_hash": password_hash,
+            "is_admin": False,
         }
         self._users[user["email"]] = user
         return user

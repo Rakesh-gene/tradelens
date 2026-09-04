@@ -29,13 +29,13 @@ class PostgresUserRepository:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, email, password_hash FROM users WHERE email = %s",
+                    "SELECT id, email, password_hash, is_admin FROM users WHERE email = %s",
                     (email.lower(),),
                 )
                 row = cursor.fetchone()
         if row is None:
             return None
-        return {"id": str(row[0]), "email": row[1], "password_hash": row[2]}
+        return {"id": str(row[0]), "email": row[1], "password_hash": row[2], "is_admin": row[3]}
 
     def create_user(self, email: str, password_hash: str) -> dict[str, object]:
         user_id = str(uuid4())

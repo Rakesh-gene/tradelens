@@ -70,6 +70,28 @@ class ApiTestCase(unittest.TestCase):
             urlopen(request)
         self.assertEqual(context.exception.code, 400)
 
+    def test_login_issues_token_and_protects_current_user(self) -> None:
+        self.repository.create_user(
+            "member@example.com",
+            "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+        )
+        request = Request(
+            f"{self.base_url}/api/login",
+            method="POST",
+            data=json.dumps({"email": "member@example.com", "password": "password123"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request) as response:
+            payload = json.load(response)
+        self.assertTrue(payload["accessToken"])
+
+        authenticated_request = Request(
+            f"{self.base_url}/api/auth/me",
+            headers={"Authorization": f"Bearer {payload['accessToken']}"},
+        )
+        with urlopen(authenticated_request) as response:
+            self.assertEqual(json.load(response)["user"]["email"], "member@example.com")
+
     def test_unknown_endpoint_returns_404(self) -> None:
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/missing")

@@ -1,17 +1,11 @@
 :root {
-  font-family:
-    "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, sans-serif;
-  color: #f6ecd6;
-  background:
-    radial-gradient(circle at 10% 12%, rgba(255, 214, 103, 0.22), transparent 22rem),
-    radial-gradient(circle at 88% 18%, rgba(242, 141, 63, 0.14), transparent 18rem),
-    radial-gradient(circle at 52% 108%, rgba(77, 105, 86, 0.22), transparent 22rem),
-    linear-gradient(145deg, #0c0f0b 0%, #14110d 44%, #1f140a 100%);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: var(--font-family-sans);
+  color: var(--color-text-primary);
+  background: var(--gradient-page);
+  font-synthesis: var(--font-synthesis);
+  text-rendering: var(--text-rendering);
+  -webkit-font-smoothing: var(--font-smoothing-webkit);
+  -moz-osx-font-smoothing: var(--font-smoothing-moz);
 }
 
 * {
@@ -21,7 +15,7 @@
 html,
 body,
 #root {
-  min-width: 320px;
+  min-width: var(--layout-min-inline);
   min-height: 100vh;
 }
 
@@ -46,38 +40,36 @@ button {
 .login-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.82fr);
-  gap: 1.5rem;
-  padding: clamp(0.75rem, 2.8vw, 2rem);
+  grid-template-columns: minmax(0, var(--layout-login-left-ratio)) minmax(var(--layout-auth-form-min), var(--layout-login-right-ratio));
+  gap: var(--space-21);
+  padding: var(--space-page-inline);
 }
 
 .left-panel,
 .login-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 236, 199, 0.1);
-  border-radius: 2rem;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.34);
+  border: var(--border-panel);
+  border-radius: var(--radius-panel);
+  backdrop-filter: var(--backdrop-blur-panel);
+  box-shadow: var(--shadow-panel);
 }
 
 .left-panel {
   display: grid;
-  align-content: space-between;
-  gap: 2rem;
-  padding: clamp(1.75rem, 4.8vw, 4.5rem);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
-    linear-gradient(145deg, rgba(255, 216, 138, 0.12), rgba(16, 18, 20, 0.52));
+  align-content: center;
+  gap: clamp(var(--space-23), 7vh, var(--space-28));
+  padding: var(--space-panel-padding);
+  background: var(--gradient-panel);
 }
 
 .left-panel::before,
 .left-panel::after {
   content: '';
   position: absolute;
-  border-radius: 999px;
-  filter: blur(4px);
-  opacity: 0.95;
+  border-radius: var(--radius-pill);
+  filter: blur(var(--size-focus-ring));
+  opacity: var(--opacity-decoration);
 }
 
 .left-panel::before {
@@ -85,7 +77,7 @@ button {
   height: 20rem;
   top: -5rem;
   right: -3rem;
-  background: radial-gradient(circle, rgba(255, 221, 120, 0.3), rgba(255, 221, 120, 0));
+  background: var(--gradient-glow-amber);
 }
 
 .left-panel::after {
@@ -93,7 +85,7 @@ button {
   height: 12rem;
   left: -2rem;
   bottom: 18%;
-  background: radial-gradient(circle, rgba(242, 141, 63, 0.22), rgba(242, 141, 63, 0));
+  background: var(--gradient-glow-orange);
 }
 
 .topbar,
@@ -102,7 +94,7 @@ button {
 .bullet-grid,
 .left-footer {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-index-content);
 }
 
 .topbar {
@@ -119,14 +111,14 @@ button {
 }
 
 .brand-mark {
-  width: 3.35rem;
-  height: 3.35rem;
+  width: var(--size-brand-mark);
+  height: var(--size-brand-mark);
   display: grid;
   place-items: center;
-  border-radius: 1rem;
-  background: linear-gradient(155deg, #ffdf84, #f28d3f);
-  color: #17110a;
-  font-weight: 800;
+  border-radius: var(--radius-md);
+  background: var(--gradient-accent);
+  color: var(--color-text-on-accent);
+  font-weight: var(--font-weight-extrabold);
   letter-spacing: 0.08em;
 }
 
@@ -145,14 +137,14 @@ button {
 }
 
 .brand-name {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-brand);
+  text-transform: var(--text-transform-label);
 }
 
 .brand-meta {
-  color: rgba(246, 236, 214, 0.7);
+  color: var(--color-text-muted);
   font-size: 0.95rem;
 }
 
@@ -174,19 +166,19 @@ button {
 
 .eyebrow {
   margin: 0;
-  color: #ffdc89;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  color: var(--color-amber-250);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-eyebrow-wide);
+  text-transform: var(--text-transform-label);
 }
 
 .hero-copy h1 {
   margin: 1rem 0 0;
-  max-width: 12ch;
-  font-size: clamp(3rem, 7.6vw, 6rem);
-  line-height: 0.9;
-  letter-spacing: -0.07em;
+  max-width: var(--layout-hero-measure);
+  font-size: var(--font-size-display-lg);
+  line-height: var(--line-height-tightest);
+  letter-spacing: var(--letter-spacing-display);
 }
 
 .hero-description {
@@ -322,8 +314,67 @@ button {
 .right-panel {
   display: grid;
   align-items: center;
+}
+
+.session-loading,
+.overview-shell {
+  min-height: 100vh;
+  padding: clamp(1rem, 4vw, 4rem);
+}
+
+.session-loading {
+  display: grid;
+  place-items: center;
+}
+
+.overview-shell {
+  max-width: 90rem;
+  margin: 0 auto;
+}
+
+.overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 1rem;
 }
+
+.overview-hero {
+  margin: clamp(4rem, 12vh, 9rem) 0 clamp(2rem, 6vh, 4rem);
+  max-width: 48rem;
+}
+
+.overview-hero h1 {
+  margin: 0.8rem 0 1rem;
+  font-size: clamp(2.8rem, 7vw, 6rem);
+  line-height: 0.95;
+  letter-spacing: -0.07em;
+}
+
+.overview-hero p:last-child {
+  color: rgba(246, 236, 214, 0.72);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.overview-grid article {
+  min-height: 10rem;
+  padding: 1.3rem;
+  display: grid;
+  align-content: space-between;
+  border: 1px solid rgba(255, 236, 199, 0.12);
+  border-radius: 1.25rem;
+  background: rgba(11, 14, 18, 0.5);
+}
+
+.overview-grid span { color: rgba(246, 236, 214, 0.6); }
+.overview-grid strong { font-size: 1.2rem; }
 
 .auth-page {
   display: grid;
@@ -336,12 +387,12 @@ button {
 }
 
 .auth-card {
-  padding: clamp(1.5rem, 4vw, 2.4rem);
-  border: 1px solid rgba(255, 236, 199, 0.1);
-  border-radius: 2rem;
-  background: rgba(8, 10, 14, 0.78);
-  backdrop-filter: blur(20px);
-  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.34);
+  padding: var(--space-auth-card-padding);
+  border: var(--border-panel);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-panel);
+  backdrop-filter: var(--backdrop-blur-panel);
+  box-shadow: var(--shadow-panel);
 }
 
 .login-header {
@@ -378,29 +429,29 @@ button {
 .ghost-button,
 .primary-button {
   border: 0;
-  border-radius: 999px;
-  cursor: pointer;
+  border-radius: var(--radius-pill);
+  cursor: var(--cursor-action);
   transition:
-    transform 160ms ease,
-    background-color 160ms ease,
-    box-shadow 160ms ease;
+    transform var(--duration-fast) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard),
+    box-shadow var(--duration-fast) var(--easing-standard);
 }
 
 .secondary-button:hover,
 .ghost-button:hover,
 .primary-button:hover {
-  transform: translateY(-1px);
+  transform: translateY(var(--motion-hover-lift));
 }
 
 .secondary-button {
-  padding: 0.95rem 1.1rem;
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff2c8;
-  border: 1px solid rgba(255, 236, 199, 0.12);
+  padding: var(--space-13) var(--space-16);
+  background: var(--color-surface-secondary);
+  color: var(--color-cream-150);
+  border: var(--border-control);
 }
 
 .secondary-quiet {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-surface-secondary-quiet);
 }
 
 .divider {
@@ -424,38 +475,39 @@ button {
 
 .login-form {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-form-row-gap);
 }
 
 .field {
   display: grid;
-  gap: 0.55rem;
-  color: rgba(246, 236, 214, 0.84);
-  font-size: 0.92rem;
+  gap: var(--space-label-to-control);
+  color: var(--color-text-label);
+  font-size: var(--font-size-base);
 }
 
 .field input {
   width: 100%;
-  padding: 1rem 1.05rem;
-  border: 1px solid rgba(255, 236, 199, 0.12);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.04);
-  color: #fff8ea;
-  outline: none;
+  min-height: var(--size-control-min-block);
+  padding: var(--space-control-block) var(--space-control-inline);
+  border: var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-control);
+  color: var(--color-text-strong);
+  outline: var(--outline-none);
 }
 
 .field input::placeholder {
-  color: rgba(246, 236, 214, 0.38);
+  color: var(--color-text-disabled);
 }
 
 .field input:focus {
-  border-color: rgba(255, 221, 120, 0.8);
-  box-shadow: 0 0 0 4px rgba(255, 221, 120, 0.12);
+  border-color: var(--color-accent-focus);
+  box-shadow: var(--shadow-focus);
 }
 
 .password-row {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-9);
 }
 
 .password-row input {
@@ -463,9 +515,10 @@ button {
 }
 
 .ghost-button {
-  padding: 0 1rem;
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff2c8;
+  min-width: var(--size-password-toggle-min-inline);
+  padding: 0 var(--space-14);
+  background: var(--color-surface-secondary);
+  color: var(--color-cream-150);
 }
 
 .form-row {
@@ -493,45 +546,12 @@ button {
 }
 
 .primary-button {
-  margin-top: 0.25rem;
-  padding: 1rem 1.2rem;
-  background: linear-gradient(155deg, #ffdf84, #f28d3f);
-  color: #17110a;
-  font-weight: 800;
-  box-shadow: 0 1rem 2rem rgba(242, 141, 63, 0.18);
-}
-
-.step-card {
-  margin-top: 1.25rem;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.step-row {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.95rem 1rem;
-  border: 1px solid rgba(255, 236, 199, 0.12);
-  border-radius: 1rem;
-  background: rgba(11, 14, 18, 0.42);
-}
-
-.step-row span {
-  width: 1.8rem;
-  height: 1.8rem;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 223, 132, 0.14);
-  color: #ffdf84;
-  font-weight: 700;
-}
-
-.step-row p {
-  margin: 0;
-  color: rgba(246, 236, 214, 0.86);
+  margin-top: var(--space-1);
+  padding: var(--space-button-block) var(--space-button-inline);
+  background: var(--gradient-accent);
+  color: var(--color-text-on-accent);
+  font-weight: var(--font-weight-extrabold);
+  box-shadow: var(--shadow-primary-button);
 }
 
 .form-message {
@@ -562,11 +582,37 @@ button {
   grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.9fr);
 }
 
+.login-shell--signup .auth-card {
+  padding: clamp(1.25rem, 2.5vw, 2rem);
+}
+
+.login-shell--signup .auth-actions {
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.login-shell--signup .divider {
+  margin: 1rem 0;
+}
+
+.login-shell--signup .login-form {
+  gap: 0.75rem;
+}
+
+.login-shell--signup .field input {
+  padding-block: 0.8rem;
+}
+
+.login-shell--signup .auth-switch,
+.login-shell--signup .legal-copy {
+  margin-top: 0.75rem;
+}
+
 .signup-aside {
   display: grid;
   align-content: center;
-  gap: 1.25rem;
-  padding: clamp(1.75rem, 4.8vw, 4.5rem);
+  gap: 1rem;
+  padding: clamp(1.5rem, 3vw, 3rem);
   border: 1px solid rgba(255, 236, 199, 0.1);
   border-radius: 2rem;
   background:
@@ -578,18 +624,18 @@ button {
 .signup-aside h1 {
   margin: 0;
   max-width: 12ch;
-  font-size: clamp(3rem, 7vw, 5.5rem);
+  font-size: clamp(2.75rem, 5.5vw, 4.5rem);
   line-height: 0.92;
   letter-spacing: -0.07em;
 }
 
 .signup-notes {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.65rem;
 }
 
 .signup-notes article {
-  padding: 1rem 1.1rem;
+  padding: 0.75rem 0.9rem;
   border: 1px solid rgba(255, 236, 199, 0.12);
   border-radius: 1.1rem;
   background: rgba(11, 14, 18, 0.42);
@@ -615,6 +661,11 @@ button {
 @media (max-width: 980px) {
   .login-shell {
     grid-template-columns: 1fr;
+    gap: var(--space-14);
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
   }
 
   .bullet-grid {
@@ -630,24 +681,89 @@ button {
 
 @media (max-width: 640px) {
   .login-shell {
-    padding: 0.75rem;
+    padding: var(--space-page-inline-mobile);
   }
 
   .left-panel,
-  .login-card {
-    border-radius: 1.5rem;
+  .login-card,
+  .auth-card,
+  .signup-aside {
+    border-radius: var(--radius-panel-mobile);
+  }
+
+  .left-panel,
+  .signup-aside {
+    padding: var(--space-panel-padding-mobile);
+  }
+
+  .auth-card {
+    padding: var(--space-auth-card-padding-mobile);
   }
 
   .topbar,
   .left-footer,
   .form-row,
-  .password-row {
+  .password-row,
+  .overview-header {
     display: grid;
   }
 
   .topbar,
-  .form-row {
-    gap: 0.75rem;
+  .form-row,
+  .overview-header {
+    gap: var(--space-9);
+  }
+
+  .topnav {
+    justify-content: flex-start;
+    gap: var(--space-5);
+  }
+
+  .topnav span {
+    padding: var(--space-3) var(--space-8);
+  }
+
+  .hero-copy h1,
+  .signup-aside h1 {
+    max-width: var(--layout-mobile-copy-max);
+    font-size: clamp(2.5rem, 12vw, 3.5rem);
+  }
+
+  .hero-description {
+    font-size: var(--font-size-md);
+    line-height: var(--line-height-relaxed);
+  }
+
+  .auth-actions {
+    margin-top: var(--space-14);
+  }
+
+  .secondary-button,
+  .primary-button,
+  .ghost-button {
+    min-height: var(--size-control-min-block);
+  }
+
+  .ghost-button {
+    padding-block: var(--space-9);
+  }
+
+  .overview-shell,
+  .session-loading {
+    padding: var(--space-panel-padding-mobile);
+  }
+
+  .overview-hero {
+    margin: var(--space-26) 0 var(--space-23);
+  }
+
+  .overview-hero h1 {
+    font-size: clamp(2.5rem, 12vw, 3.5rem);
+  }
+
+  .overview-grid article {
+    min-height: 8rem;
+    padding: var(--space-17);
   }
 
   .hero-copy h1 {

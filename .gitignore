@@ -2,6 +2,13 @@ src/frontend/node_modules/
 src/frontend/.npm-cache/
 src/frontend/dist/
 src/backend/.venv/
+src/backend/.env
+.backend.pid
+.frontend.pid
+backend.log
+backend-error.log
+frontend.log
+frontend-error.log
 __pycache__/
 *.py[cod]
 .chrome-preview/
