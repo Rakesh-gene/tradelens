@@ -13,17 +13,67 @@ src/
     auth/                  Authentication domain service, token helpers, models
     data_pipeline/         External market-data clients and ingestion jobs
     migrations/            Ordered, append-only PostgreSQL migrations
+    pattern_engine/        Planned engine package; add per server plan
     repositories/          Repository implementations and migration runner
     server_http/           HTTP request/response boundary
+  doc/                     Product specification and implementation plans
   frontend/                Vite + React single-page application
+    src/api/               Planned fetch wrapper and domain API functions
+    src/auth/              Planned browser session helpers
     src/components/        Reusable presentational/form components
+    src/hooks/             Planned focused browser/data hooks
     src/pages/             Route-level page components
+    src/routing/           Planned route matching and path builders
+    src/utils/             Planned formatting, guards, query helpers
     src/styles.css         Shared design system and page styling
 ```
 
 Keep domain logic out of HTTP handlers and React view components. The codebase
 is deliberately small and explicit: add a focused file in the relevant layer
 instead of creating broad abstractions.
+
+## Canonical product documents
+
+Read these before changing the positional-pattern product:
+
+- `src/doc/positional_trading_pattern_engine_spec.md` is the canonical product,
+  taxonomy, mathematical, scoring, and lifecycle specification.
+- `src/doc/positional_trading_pattern_engine_implementation_plan.md` defines
+  the server, database, data pipeline, engine, and backtesting phases.
+- `src/doc/positional_trading_pattern_engine_client_implementation_plan.md`
+  defines client screens, browser behavior, API wire contracts, and integration
+  phases.
+
+The specification wins if a plan conflicts with it. Update the relevant plan
+and this guide when an accepted architectural decision changes. Do not silently
+invent a different threshold, formula, identifier, response shape, or ownership
+boundary.
+
+## Product defaults that need not be restated
+
+Unless a task explicitly says otherwise, assume all of the following:
+
+- TradeLens is an end-of-day Indian-equities pattern-analysis product, not an
+  intraday trading terminal or recommendation engine.
+- NSE is an upstream server-side data source. Browsers never call NSE directly.
+- User-facing prices, features, and patterns use corporate-action-adjusted data.
+- Every displayed market result states its `dataAsOf` date. Stale or partially
+  processed data remains clearly labelled and never appears live.
+- Pattern detection, adjusted prices, features, scores, ranking, pagination,
+  and historical outcomes are calculated by the server. The client formats and
+  explains supplied values; it does not reconstruct them.
+- Pattern identifiers and lifecycle values are stable machine contracts. Use
+  exact specification values rather than display labels as stored values.
+- Setup score ranks current evidence. It is not win probability, expected
+  return, a recommendation, or a substitute for backtest outcomes.
+- Historical research is point-in-time: no future candles, unconfirmed future
+  pivots, current-only index membership, or survivorship-biased universe.
+- Engine output is explainable and versioned. A result must retain enough
+  measurements, events, and data/configuration lineage to reproduce it.
+- Product APIs other than health and authentication require a valid bearer
+  token.
+- Desktop, tablet, 390px, and 320px layouts are part of normal completion, as
+  are keyboard access and all loading/error/empty states.
 
 ## Working conventions
 
@@ -55,6 +105,36 @@ Django. Routes belong in `src/backend/server_http/api.py`.
   an HTTP payload, and return. Do not embed SQL or business rules in handlers.
 - Maintain camelCase JSON fields for browser-facing payloads, while Python
   internals use snake_case.
+- Parse and validate query parameters through focused helpers/services. Handlers
+  must not load an entire market universe and paginate it in memory.
+- New error responses use a stable envelope with `code`, user-safe `message`,
+  optional `details`, and `requestId`. The existing `{ "error": "message" }`
+  auth response remains supported until deliberately migrated.
+- All market-data responses include `dataAsOf`, `generatedAt`, `engineVersion`,
+  `configurationVersion`, and `isStale` where applicable.
+- Use ISO `YYYY-MM-DD` market dates and UTC ISO-8601 timestamps. Send missing
+  values as JSON `null`, never an empty string or fabricated zero.
+
+### Product API surface
+
+Treat the following as the default browser/server integration surface:
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/overview` | Freshness, pipeline, market breadth, lifecycle counts, top setups |
+| `GET /api/setups` | Filtered, server-sorted, cursor-paginated setup summaries and facets |
+| `GET /api/patterns/{id}` | Complete pattern evidence, measurements, scores, and lineage |
+| `GET /api/patterns/{id}/events` | Immutable lifecycle timeline |
+| `GET /api/securities?query=...` | Eligible-security search |
+| `GET /api/securities/{isin}/fingerprint` | Standard technical fingerprint |
+| `GET /api/securities/{isin}/chart` | Bounded adjusted bars, indicators, levels, actions, and events |
+| `POST /api/research/runs` | Start asynchronous historical research |
+| `GET /api/research/runs/{id}` | Read research status |
+| `GET /api/research/runs/{id}/results` | Read outcomes and comparison |
+
+The detailed request/response examples live in the client integration plan.
+Changing a field name, enum, unit, pagination model, or nullability is a contract
+change and requires coordinated server tests, client fixtures, and consumers.
 
 ### Services and repositories
 
@@ -106,6 +186,88 @@ External exchange behavior is isolated in `data_pipeline/`.
 - Validate downloaded schemas before persisting rows. Do not store an HTML
   error response or malformed CSV as market data.
 
+### Market-data ingestion and adjustment
+
+- Treat `isin` as the stable equity identity; symbols and company names may
+  change over time.
+- Keep raw source values, normalized values, and adjusted values distinguishable
+  and traceable. Never overwrite raw bars with adjusted bars.
+- The initial history job imports ten years for every eligible security and is
+  resumable at a security/date-chunk checkpoint.
+- The daily job imports only deltas plus a configurable repair window so late
+  corrections and corporate actions are discovered safely.
+- Imports are idempotent and use deterministic upserts. A retry must not create
+  duplicate bars, actions, features, or pattern events.
+- Record source, requested range, run ID, status, attempt, row counts, and error
+  category. Never log exchange cookies or raw sensitive headers.
+- Corporate actions are effective-dated and versioned. Confirm what NSE has
+  already adjusted before applying factors; never double-adjust history.
+- Recomputing an adjustment version invalidates and rebuilds affected features,
+  swings, zones, patterns, and research results in dependency order.
+- Scheduled-job methods remain callable by CLI and tests. Scheduling technology
+  is an outer operational concern, not embedded in collectors or services.
+
+### Pattern-engine architecture
+
+Keep calculation stages separate and execute them in this order:
+
+```text
+normalize -> adjust -> features -> swings -> zones -> supporting detectors
+-> primary bases -> breakouts -> pullbacks -> failures -> quality/maturity
+-> context -> setup score -> lifecycle -> persistence/events
+```
+
+- Detectors are deterministic, configuration-driven, and side-effect free.
+  They consume bars/features/context and return candidates; they do not save.
+- The lifecycle service owns candidate matching, deduplication, transitions,
+  expiry, and immutable event generation.
+- Repository implementations own storage and transaction boundaries. Do not
+  put SQL in a detector, scorer, service, job, or HTTP handler.
+- Features, confirmed swings, zones, and patterns are keyed by security,
+  effective/as-of date, and relevant calculation version.
+- Swing pivots become usable only on their confirmation date. Breakout reference
+  highs exclude the current trigger bar.
+- Detection geometry remains independent of market/sector regime. Context may
+  change ranking but must not change whether geometry exists.
+- Store quality, maturity, context, and setup scores separately, including
+  named component contributions. Normalize scores to 0-100 at their boundary.
+- Do not create a new pattern instance on every scan. Update an overlapping
+  active instance with a similar base/pivot and emit meaningful changes as
+  immutable events.
+- Terminal lifecycle states are `FAILED`, `INVALIDATED`, and `EXPIRED`. Do not
+  move a terminal instance backwards.
+
+Stable lifecycle vocabulary:
+
+```text
+DETECTED FORMING MATURE READY TRIGGERED CONFIRMED FAILED INVALIDATED EXPIRED
+```
+
+Stable V1 primary families:
+
+```text
+BASE-VCP BASE-FLAT BASE-52WH BRK-RANGE BRK-52WH BRK-ATH BRK-MULTIY
+PB-BRKRET PB-EMA20 PB-SMA50
+```
+
+Supporting and failure identifiers must match the canonical specification.
+Variants such as `VCP-3C`, `PB-SMA50-T2`, `BRK-3Y`, and `COMP-IB2` use the
+canonical type/variant split; do not create near-duplicate type names.
+
+### Backtesting and research
+
+- Production scans and historical replay use the same detector and scorer code.
+- Advance replay one trading session at a time and expose only information known
+  at that point, including confirmation dates and effective-dated membership.
+- Reconstruct the eligible historical universe rather than filtering today's
+  securities backward through time.
+- Persist run configuration, engine/data versions, filters, entry facts, sample
+  completeness, and outcomes so a result is reproducible.
+- Standard outcomes include 5/10/20/40/60-session returns, MFE, MAE,
+  days-to-threshold, and hit-before-loss measures from the specification.
+- Do not show probability-like claims for inadequate samples. Never derive
+  historical probability from setup score.
+
 ## Database and migrations
 
 PostgreSQL is the application database. The local Docker instance is configured
@@ -135,8 +297,12 @@ change.
   checks, and session restoration.
 - Page-level views belong in `src/frontend/src/pages/`.
 - Reusable form/UI behavior belongs in `src/frontend/src/components/`.
-- Keep browser API calls (`fetch`, `sessionStorage`, History API) at a page or
-  app boundary, not in generic presentational components.
+- Keep the low-level `fetch` call in `src/frontend/src/api/apiClient.js` and use
+  domain API modules from pages/hooks. Generic presentational components never
+  fetch, read session storage, or navigate.
+- Keep `sessionStorage` ownership in `src/frontend/src/auth/`, History API
+  ownership in the app/routing boundary, and formatting/query parsing in pure
+  utilities.
 - The access token is stored in `sessionStorage` under
   `tradelensAccessToken`. Sign-out must remove it and use
   `history.replaceState` before navigating to `/` so browser Back cannot reveal
@@ -148,6 +314,61 @@ change.
 - Use the automatic JSX runtime configured in `vite.config.js`. Existing files
   may import React explicitly for compatibility; preserve a file's established
   import style when editing it.
+
+### Client routes and navigation
+
+The normal route set is `/`, `/signup`, `/overview`, `/setups`,
+`/patterns/:patternId`, `/securities/:isin`, and later `/research`.
+
+- Preserve the small History API router. Put dynamic matching and path builders
+  in `src/frontend/src/routing/routes.js`; do not add React Router by default.
+- Use semantic anchors for navigation and intercept only same-origin plain
+  clicks. Preserve modifier-click and open-in-new-tab behavior.
+- Keep screener filters, sorting, selected as-of date, and other shareable view
+  state in URL query parameters, not hidden global component state.
+- Use `pushState` for ordinary navigation and `replaceState` for sign-in,
+  sign-out, and authentication failure.
+- Unknown routes render a not-found page. Validate dynamic IDs before calling
+  the API.
+
+### Client API and asynchronous state
+
+- The shared API client attaches JSON headers, bearer token, query parameters,
+  abort signal, and structured error mapping. Never log credentials or tokens.
+- Use `URLSearchParams`; treat server cursors as opaque. Omit empty optional
+  filters rather than sending ambiguous empty strings.
+- Abort superseded requests and component-unmount requests. An aborted request
+  is not a user-facing error, and a late response must not replace newer data.
+- A server-side collection owns filtering, sorting, facets, and cursor
+  pagination. Default setup page size is 25 unless measurement changes it.
+- Every server-backed page/region defines initial loading, refreshing, empty,
+  partial, stale, unauthorized, forbidden, not-found, and retryable error
+  behavior as applicable.
+- On `401`, clear the session and replace navigation to login. On `403`, retain
+  the session and show a permission state.
+- Unknown future enum and measurement fields must not crash a page. Show the raw
+  enum label and place unknown measurements in an expandable fallback section.
+- Do not add a global state or query/cache library by default. Start with small
+  focused hooks, `AbortController`, and page-owned state.
+
+### Market-product presentation
+
+- `OverviewPage` shows EOD freshness/pipeline status, market regime and breadth,
+  counts by lifecycle state, top-ranked setups, and the ranking disclaimer.
+- `SetupsPage` uses a server-sorted table on desktop and equivalent cards on
+  mobile. Filters and pagination must remain reproducible from the URL.
+- `PatternDetailPage` shows security identity, state/dates, four separate score
+  categories, measurements, pivot/support/invalidation, supporting evidence,
+  adjusted chart, event timeline, and lineage.
+- `SecurityPage` implements the standardized technical fingerprint: trend,
+  primary setup, state/maturity, compression, momentum, RS, volume, location,
+  context, scores, active patterns, and recent events.
+- Charts consume adjusted/downsampled server series. They may compute SVG pixel
+  coordinates but no financial values. Supply a keyboard-accessible textual or
+  tabular alternative and never rely on color alone.
+- Format INR and Indian-number grouping with `Intl.NumberFormat('en-IN')`.
+  A server field ending in `Pct` already contains percentage points: `1.7`
+  displays as `1.7%`, not `170%`.
 
 ## Frontend design system
 
@@ -187,6 +408,13 @@ controls.
   add large transforms, bouncy animation, or flashing market-style effects.
 - Retain semantic HTML, visible labels, keyboard-capable native controls, and
   descriptive `aria-label`s for form/page regions.
+- Use one `h1` per page, a skip link in the authenticated shell, ordered heading
+  levels, labelled tables, announced sort direction, and restrained live-region
+  updates for result counts and errors.
+- A filter drawer behaves as a dialog: labelled title, close action, Escape,
+  focus containment, and focus restoration.
+- Lifecycle state and score meaning must use text and shape/icon cues in
+  addition to color.
 
 ### Layout and responsiveness
 
@@ -233,6 +461,12 @@ npm run build
 .\restart-services.ps1
 ```
 
+When frontend tests are introduced, keep a stable `npm test` script and run it
+before `npm run build`. Prefer unit tests for route/query/formatting/API helpers,
+component tests for interactions and async states, and checked-in sanitized API
+fixtures for contracts. Do not put tokens or large production payloads in
+fixtures.
+
 For UI work, verify the relevant route after Vite has reloaded and confirm:
 
 - no browser console errors;
@@ -241,7 +475,11 @@ For UI work, verify the relevant route after Vite has reloaded and confirm:
 - sign-out does not allow Back to reveal protected content;
 - the target auth page has no unintended vertical scroll at the normal desktop
   viewport and still works at 390px-wide and 320px-wide mobile breakpoints;
-- no route has horizontal overflow at the tested mobile widths.
+- no route has horizontal overflow at the tested mobile widths;
+- setup filters and sort survive refresh, Back/Forward, and copied URLs;
+- stale/partial data is visibly labelled with its market date;
+- desktop tables and mobile cards expose the same decision-critical fields;
+- charts agree with server levels/measurements and have a non-visual fallback.
 
 `restart-services.ps1` is responsible for replacing services on ports 5004 and
 9004. If Windows denies stopping a listener owned by another account, report
@@ -253,13 +491,21 @@ PowerShell; do not silently claim the restart succeeded.
 Before handing off a change, confirm the following as applicable:
 
 - Architecture boundaries remain intact (handler -> service -> repository).
+- Market processing follows the canonical stage order and detectors remain
+  pure/configuration-driven.
 - New database schema is an append-only migration with safe repeat behavior.
 - Secrets remain in local environment files and are absent from Git-tracked
   files and response logs.
 - New API behavior has an automated backend test, including authorization
   failures where relevant.
+- Changed API contracts update server tests, client contract fixtures, and all
+  consuming pages together.
 - Frontend code builds successfully and the relevant route is visually checked.
+- Server-backed UI includes applicable loading, refreshing, empty, stale,
+  partial, authorization, not-found, and retry states.
 - Visual additions use the established warm-dark tokens, radii, spacing, and
   responsive breakpoints.
+- Pattern results preserve measurements, separate scores, events, and version
+  lineage; setup score is not presented as probability.
 - Local services are either verified healthy or any port/permission blocker is
   stated plainly.

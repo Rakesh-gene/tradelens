@@ -1,0 +1,12 @@
+{
+  "data": [
+    {"symbol": "EXAMPLE", "exDate": "04-Sep-2026", "subject": "Dividend - Rs. 5.00 Per Share", "recDate": "05-Sep-2026"},
+    {"symbol": "EXAMPLE", "exDate": "05-Sep-2026", "subject": "Bonus Issue 1:2"},
+    {"symbol": "EXAMPLE", "exDate": "06-Sep-2026", "subject": "Stock Split 1:5"},
+    {"symbol": "EXAMPLE", "exDate": "07-Sep-2026", "subject": "Rights Issue 1:4"},
+    {"symbol": "EXAMPLE", "exDate": "08-Sep-2026", "subject": "Consolidation 5:1"},
+    {"symbol": "EXAMPLE", "exDate": "09-Sep-2026", "subject": "Buyback of equity shares"},
+    {"symbol": "EXAMPLE", "exDate": "10-Sep-2026", "subject": "Scheme of Arrangement"},
+    {"symbol": "OTHER", "exDate": "04-Sep-2026", "subject": "Dividend - Rs. 1.00 Per Share"}
+  ]
+}

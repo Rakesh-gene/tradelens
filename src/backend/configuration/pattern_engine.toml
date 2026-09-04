@@ -1,0 +1,151 @@
+[engine]
+version = "v1"
+minimum_history_sessions = 250
+
+[data]
+initial_history_years = 10
+daily_repair_window_sessions = 10
+minimum_price = 20.0
+
+[adjustments]
+methodology_version = "v1"
+source_mode = "TRADELENS_REBUILT"
+cash_dividend_policy = "ignore"
+
+[swings]
+left_bars = 3
+right_bars = 3
+meaningful_move_natr = 1.5
+minimum_swing_separation_sessions = 3
+
+[zones]
+tolerance_pct = 2.0
+maximum_dispersion_pct = 3.0
+minimum_tests = 2
+lookback_sessions = 120
+
+[liquidity]
+minimum_close_price = 20.0
+minimum_history_sessions = 250
+median_traded_value_20 = 20000000.0
+median_volume_20 = 0
+
+[vcp]
+min_duration_sessions = 20
+max_duration_sessions = 90
+min_depth_pct = 8.0
+max_depth_pct = 35.0
+min_contractions = 2
+max_contractions = 5
+max_final_contraction_pct = 8.0
+ready_pivot_distance_pct = 3.0
+ready_maturity_score = 80.0
+max_atr_compression_ratio = 0.75
+max_volume_compression_ratio = 0.70
+
+[flat_base]
+min_duration_sessions = 20
+max_duration_sessions = 60
+min_depth_pct = 0.0
+max_depth_pct = 15.0
+max_range_pct = 15.0
+ready_pivot_distance_pct = 3.0
+
+[base_52wh]
+min_duration_sessions = 20
+max_duration_sessions = 120
+min_depth_pct = 0.0
+max_depth_pct = 35.0
+maximum_distance_to_52_week_high_pct = 15.0
+ready_pivot_distance_pct = 3.0
+
+[breakout]
+minimum_resistance_tests = 2
+lookback_min_sessions = 20
+lookback_max_sessions = 120
+breakout_buffer_pct = 0.5
+minimum_close_above_pivot_pct = 0.0
+minimum_volume_expansion_ratio = 1.2
+failure_window_sessions = 5
+
+[breakout_retest]
+min_sessions_after_breakout = 3
+max_sessions_after_breakout = 30
+preferred_min_sessions = 5
+preferred_max_sessions = 20
+max_retest_depth_pct = 8.0
+reclaim_buffer_pct = 0.5
+
+[ema20_pullback]
+min_depth_pct = 3.0
+max_depth_pct = 12.0
+min_duration_sessions = 2
+max_duration_sessions = 10
+ema_touch_tolerance_pct = 2.0
+minimum_ema_slope_pct = 0.0
+
+[sma50_pullback]
+min_depth_pct = 5.0
+max_depth_pct = 20.0
+min_duration_sessions = 3
+max_duration_sessions = 20
+sma_touch_tolerance_pct = 2.0
+minimum_sma_slope_pct = 0.0
+
+[trend]
+stage_2_minimum_score = 70.0
+minimum_higher_high_low_pairs = 2
+ma_slope_lookback_sessions = 20
+
+[compression]
+nr7_lookback_sessions = 7
+inside_bar_max_depth = 3
+atr_lookback_sessions = 20
+maximum_atr_ratio = 0.75
+maximum_range_pct = 5.0
+
+[momentum]
+acceleration_lookback_sessions = 20
+relative_strength_lookback_sessions = 126
+relative_strength_breakout_lookback_sessions = 252
+minimum_relative_strength_percentile = 70.0
+
+[volume]
+dry_up_lookback_sessions = 50
+maximum_dry_up_ratio = 0.70
+expansion_lookback_sessions = 50
+minimum_expansion_ratio = 1.20
+
+[failure]
+breakout_failure_window_sessions = 5
+base_support_break_pct = 2.0
+ema20_failure_close_below_pct = 2.0
+sma50_failure_close_below_pct = 2.0
+structural_failure_lookback_sessions = 60
+climax_volume_ratio = 2.0
+
+[quality_weights]
+geometry = 35.0
+contraction = 25.0
+volume = 20.0
+location = 20.0
+
+[maturity_weights]
+structure = 40.0
+compression = 30.0
+pivot_proximity = 30.0
+
+[context_weights]
+market_regime = 25.0
+sector_strength = 25.0
+trend = 20.0
+relative_strength = 20.0
+liquidity = 10.0
+
+[setup_weights]
+pattern_quality = 35.0
+pattern_maturity = 20.0
+trend = 15.0
+relative_strength = 15.0
+sector = 10.0
+volume = 5.0

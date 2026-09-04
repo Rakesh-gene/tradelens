@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "CH_SYMBOL": " EXAMPLE ",
+      "CH_ISIN": "INE000000001",
+      "CH_SERIES": " EQ ",
+      "CH_TIMESTAMP": "04-Sep-2026",
+      "CH_OPENING_PRICE": "1,000.00",
+      "CH_TRADE_HIGH_PRICE": "1,015.00",
+      "CH_TRADE_LOW_PRICE": "995.00",
+      "CH_CLOSING_PRICE": "1,010.00",
+      "CH_TOT_TRADED_QTY": "1,234,567",
+      "COP_DELIV_QTY": "500,000",
+      "COP_DELIV_PER": "40.50"
+    }
+  ]
+}

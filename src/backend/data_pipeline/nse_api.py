@@ -1,60 +1,331 @@
+"""NSE-specific HTTP access with browser session handling and bounded retries."""
+
 from __future__ import annotations
 
+from datetime import date, timedelta
 import http.cookiejar
-from urllib.error import HTTPError
+import json
+import random
+import socket
+import time
+from typing import Callable, Mapping
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
+
+from data_pipeline.models import (
+    NseCorporateActionRecord,
+    NseEquityHistoryRecord,
+    NseIndexHistoryRecord,
+)
+from data_pipeline.normalization import (
+    parse_corporate_actions_response,
+    parse_equity_history_response,
+    parse_index_history_response,
+)
+
+
+class NseRequestError(RuntimeError):
+    """A classified NSE transport or response failure safe to expose to a job log."""
+
+    def __init__(self, category: str, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.category = category
+        self.status_code = status_code
+
+
+class NseResponseError(NseRequestError):
+    """NSE returned a successful HTTP response that is not the requested content."""
 
 
 class NseApiClient:
-    """HTTP client for NSE endpoints.
-
-    NSE requests need a browser user-agent. Some NSE endpoints also need an
-    initial visit to the NSE site to obtain cookies. Keep this exchange-specific
-    behaviour here rather than in collectors.
-    """
+    """HTTP client for NSE endpoints; collectors must not implement NSE protocol rules."""
 
     HOME_URL = "https://www.nseindia.com/"
+    API_URL = "https://www.nseindia.com/api"
     EQUITIES_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
-    # NSE rejects generic HTTP library user agents. This matches a current
-    # desktop browser.
+    EQUITY_HISTORY_URL = "https://www.nseindia.com/NextApi/apiClient/GetQuoteApi"
+    CORPORATE_ACTIONS_URL = f"{API_URL}/corporates-corporateActions"
+    INDEX_HISTORY_URL = f"{API_URL}/historical/indicesHistory"
+    EOD_REPORT_URL_TEMPLATE = (
+        "https://nsearchives.nseindia.com/content/cm/"
+        "BhavCopy_NSE_CM_0_0_0_{date}_F_0000.csv.zip"
+    )
+    DELIVERY_REPORT_URL_TEMPLATE = "https://nsearchives.nseindia.com/archives/equities/mto/MTO_{date}.DAT"
     USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/131.0.0.0 Safari/537.36"
     )
 
-    def __init__(self, timeout_seconds: float = 20) -> None:
+    def __init__(
+        self,
+        timeout_seconds: float = 20,
+        *,
+        max_retries: int = 3,
+        max_requests_per_second: float = 2.0,
+        max_history_days: int = 100,
+        opener=None,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+        random_value: Callable[[], float] = random.random,
+    ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if max_requests_per_second <= 0:
+            raise ValueError("max_requests_per_second must be positive")
+        if max_history_days <= 0:
+            raise ValueError("max_history_days must be positive")
         self._timeout_seconds = timeout_seconds
-        self._opener = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self._max_retries = max_retries
+        self._request_interval_seconds = 1 / max_requests_per_second
+        self._max_history_days = max_history_days
+        self._opener = opener or build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self._monotonic = monotonic
+        self._sleeper = sleeper
+        self._random_value = random_value
+        self._next_request_at = 0.0
         self._session_ready = False
 
     def download_equities_csv(self) -> bytes:
-        """Download the current NSE equity master CSV."""
-        try:
-            return self._download_equities_csv()
-        except HTTPError as error:
-            if error.code != 403 or self._session_ready:
-                raise
-        self._ensure_session()
-        return self._download_equities_csv()
+        """Download the NSE equity master CSV after validating it is not an error page."""
 
-    def _download_equities_csv(self) -> bytes:
-        request = Request(
-            self.EQUITIES_URL,
-            headers={
-                "User-Agent": self.USER_AGENT,
-                "Accept": "text/csv,application/octet-stream;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": self.HOME_URL,
-            },
+        return self._download_file(self.EQUITIES_URL, "equity master CSV")
+
+    def fetch_equity_history(
+        self, symbol: str, from_date: date, to_date: date
+    ) -> list[NseEquityHistoryRecord]:
+        """Return validated equity-history DTOs in bounded NSE requests, without persistence."""
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        records: list[NseEquityHistoryRecord] = []
+        for chunk_from, chunk_to in self._date_chunks(from_date, to_date):
+            payload = self._request_json(
+                self.EQUITY_HISTORY_URL,
+                {
+                    "functionName": "getHistoricalTradeData",
+                    "symbol": normalized_symbol,
+                    "series": "EQ",
+                    "fromDate": self._format_date(chunk_from),
+                    "toDate": self._format_date(chunk_to),
+                },
+            )
+            records.extend(parse_equity_history_response(payload, normalized_symbol))
+        return self._deduplicate_history(records)
+
+    def fetch_corporate_actions(
+        self, symbol: str, from_date: date, to_date: date
+    ) -> list[NseCorporateActionRecord]:
+        """Return validated actions for a symbol without persisting them."""
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        records: list[NseCorporateActionRecord] = []
+        for chunk_from, chunk_to in self._date_chunks(from_date, to_date):
+            payload = self._request_json(
+                self.CORPORATE_ACTIONS_URL,
+                {
+                    "index": "equities",
+                    "from_date": self._format_date(chunk_from),
+                    "to_date": self._format_date(chunk_to),
+                },
+            )
+            records.extend(parse_corporate_actions_response(payload, normalized_symbol))
+        return self._deduplicate_actions(records)
+
+    def fetch_index_history(
+        self, index_name: str, from_date: date, to_date: date
+    ) -> list[NseIndexHistoryRecord]:
+        """Return validated index history for the requested date range without persistence."""
+
+        normalized_index = " ".join(index_name.strip().upper().split())
+        if not normalized_index:
+            raise ValueError("index_name is required")
+        records: list[NseIndexHistoryRecord] = []
+        for chunk_from, chunk_to in self._date_chunks(from_date, to_date):
+            payload = self._request_json(
+                self.INDEX_HISTORY_URL,
+                {
+                    "indexType": normalized_index,
+                    "from": self._format_date(chunk_from),
+                    "to": self._format_date(chunk_to),
+                },
+            )
+            records.extend(parse_index_history_response(payload, normalized_index))
+        unique = {(record.trading_date, record.index_name): record for record in records}
+        return [unique[key] for key in sorted(unique)]
+
+    def download_eod_report(self, trading_date: date) -> bytes:
+        """Download the NSE bulk EOD report when the archive has published it."""
+
+        return self._download_file(
+            self.EOD_REPORT_URL_TEMPLATE.format(date=trading_date.strftime("%d%m%Y")),
+            f"EOD report for {trading_date.isoformat()}",
         )
+
+    def download_delivery_report(self, trading_date: date) -> bytes:
+        """Download the optional NSE delivery report when it is available."""
+
+        return self._download_file(
+            self.DELIVERY_REPORT_URL_TEMPLATE.format(date=trading_date.strftime("%d%m%Y")),
+            f"delivery report for {trading_date.isoformat()}",
+        )
+
+    def _request_json(self, url: str, parameters: Mapping[str, str]) -> object:
+        query = urlencode(parameters)
+        body, content_type = self._request_bytes(
+            f"{url}?{query}",
+            "application/json, text/plain;q=0.9, */*;q=0.8",
+        )
+        self._validate_json_response(body, content_type)
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise NseResponseError("INVALID_JSON", "NSE returned malformed JSON") from exc
+
+    def _download_file(self, url: str, description: str) -> bytes:
+        body, content_type = self._request_bytes(
+            url,
+            "text/csv,application/zip,application/octet-stream,text/plain;q=0.9,*/*;q=0.8",
+        )
+        self._validate_file_response(body, content_type, description)
+        return body
+
+    def _request_bytes(self, url: str, accept: str) -> tuple[bytes, str | None]:
+        last_error: NseRequestError | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                return self._open_once(url, accept)
+            except Exception as error:  # noqa: BLE001 - normalize transport exceptions at this boundary
+                classified = self._classify_error(error)
+                if classified.status_code == 403 and not self._session_ready:
+                    self._ensure_session()
+                    last_error = classified
+                    continue
+                last_error = classified
+                if not self._is_retryable(classified) or attempt == self._max_retries:
+                    raise classified from error
+                self._backoff(attempt)
+        raise last_error or NseRequestError("UNKNOWN", "NSE request failed")
+
+    def _open_once(self, url: str, accept: str) -> tuple[bytes, str | None]:
+        self._wait_for_request_slot()
+        request = Request(url, headers=self._headers(accept))
         with self._opener.open(request, timeout=self._timeout_seconds) as response:
-            return response.read()
+            status_code = getattr(response, "status", 200)
+            if status_code >= 400:
+                raise NseRequestError("HTTP_ERROR", f"NSE returned HTTP {status_code}", status_code=status_code)
+            return response.read(), self._response_content_type(response)
 
     def _ensure_session(self) -> None:
         if self._session_ready:
             return
-        request = Request(self.HOME_URL, headers={"User-Agent": self.USER_AGENT})
-        with self._opener.open(request, timeout=self._timeout_seconds):
-            pass
+        self._open_once(self.HOME_URL, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
         self._session_ready = True
+
+    def _wait_for_request_slot(self) -> None:
+        now = self._monotonic()
+        if self._next_request_at > now:
+            self._sleeper(self._next_request_at - now)
+        self._next_request_at = self._monotonic() + self._request_interval_seconds
+
+    def _backoff(self, attempt: int) -> None:
+        base_delay = min(8.0, 0.25 * (2 ** attempt))
+        self._sleeper(base_delay + (self._random_value() * 0.25))
+
+    def _headers(self, accept: str) -> dict[str, str]:
+        return {
+            "User-Agent": self.USER_AGENT,
+            "Accept": accept,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": self.HOME_URL,
+            "Connection": "keep-alive",
+        }
+
+    @staticmethod
+    def _response_content_type(response) -> str | None:
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return None
+        if hasattr(headers, "get_content_type"):
+            return headers.get_content_type()
+        value = headers.get("Content-Type") if hasattr(headers, "get") else None
+        return str(value).split(";", maxsplit=1)[0].strip().lower() if value else None
+
+    @staticmethod
+    def _validate_json_response(body: bytes, content_type: str | None) -> None:
+        NseApiClient._reject_html_or_empty(body, content_type, "JSON response")
+        if content_type and "json" not in content_type and content_type not in {"text/plain", "application/octet-stream"}:
+            raise NseResponseError("INVALID_CONTENT_TYPE", f"NSE returned {content_type} instead of JSON")
+
+    @staticmethod
+    def _validate_file_response(body: bytes, content_type: str | None, description: str) -> None:
+        NseApiClient._reject_html_or_empty(body, content_type, description)
+
+    @staticmethod
+    def _reject_html_or_empty(body: bytes, content_type: str | None, description: str) -> None:
+        stripped = body.lstrip().lower()
+        if not stripped:
+            raise NseResponseError("EMPTY_RESPONSE", f"NSE returned an empty {description}")
+        if (content_type and "html" in content_type) or stripped.startswith(b"<!doctype html") or stripped.startswith(b"<html"):
+            raise NseResponseError("HTML_BLOCK_PAGE", f"NSE returned an HTML page instead of {description}")
+
+    @staticmethod
+    def _classify_error(error: Exception) -> NseRequestError:
+        if isinstance(error, NseRequestError):
+            return error
+        if isinstance(error, HTTPError):
+            category = "RATE_LIMITED" if error.code == 429 else "ACCESS_DENIED" if error.code == 403 else "HTTP_ERROR"
+            return NseRequestError(category, f"NSE returned HTTP {error.code}", status_code=error.code)
+        if isinstance(error, (socket.timeout, TimeoutError)):
+            return NseRequestError("TIMEOUT", "NSE request timed out")
+        if isinstance(error, ConnectionResetError):
+            return NseRequestError("CONNECTION_RESET", "NSE reset the connection")
+        if isinstance(error, URLError):
+            if isinstance(error.reason, (socket.timeout, TimeoutError)):
+                return NseRequestError("TIMEOUT", "NSE request timed out")
+            if isinstance(error.reason, ConnectionResetError):
+                return NseRequestError("CONNECTION_RESET", "NSE reset the connection")
+            return NseRequestError("NETWORK_ERROR", "NSE network request failed")
+        return NseRequestError("UNKNOWN", "NSE request failed")
+
+    @staticmethod
+    def _is_retryable(error: NseRequestError) -> bool:
+        return (
+            error.status_code in {403, 429}
+            or error.status_code is not None and error.status_code >= 500
+            or error.category in {"TIMEOUT", "CONNECTION_RESET", "NETWORK_ERROR"}
+        )
+
+    def _date_chunks(self, from_date: date, to_date: date) -> list[tuple[date, date]]:
+        if from_date > to_date:
+            raise ValueError("from_date cannot be after to_date")
+        chunks: list[tuple[date, date]] = []
+        chunk_from = from_date
+        while chunk_from <= to_date:
+            chunk_to = min(chunk_from + timedelta(days=self._max_history_days - 1), to_date)
+            chunks.append((chunk_from, chunk_to))
+            chunk_from = chunk_to + timedelta(days=1)
+        return chunks
+
+    @staticmethod
+    def _format_date(value: date) -> str:
+        return value.strftime("%d-%m-%Y")
+
+    @staticmethod
+    def _normalize_symbol(value: str) -> str:
+        normalized = " ".join(value.strip().upper().split())
+        if not normalized:
+            raise ValueError("symbol is required")
+        return normalized
+
+    @staticmethod
+    def _deduplicate_history(records: list[NseEquityHistoryRecord]) -> list[NseEquityHistoryRecord]:
+        unique = {(record.trading_date, record.symbol, record.series): record for record in records}
+        return [unique[key] for key in sorted(unique)]
+
+    @staticmethod
+    def _deduplicate_actions(records: list[NseCorporateActionRecord]) -> list[NseCorporateActionRecord]:
+        unique = {record.source_event_key: record for record in records}
+        return sorted(unique.values(), key=lambda record: (record.ex_date, record.source_event_key))
