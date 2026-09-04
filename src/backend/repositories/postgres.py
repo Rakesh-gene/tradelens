@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import uuid4
 
 try:
@@ -7,31 +8,22 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional at test time
     psycopg = None
 
+from repositories.migrations import MigrationRunner
+
 
 class PostgresUserRepository:
     def __init__(self, dsn: str) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg is required for PostgreSQL support")
         self._dsn = dsn
-        self._ensure_schema()
+        self._apply_migrations()
 
     def _connect(self):
         return psycopg.connect(self._dsn)
 
-    def _ensure_schema(self) -> None:
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        id UUID PRIMARY KEY,
-                        email TEXT NOT NULL UNIQUE,
-                        password_hash TEXT NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    )
-                    """
-                )
-            connection.commit()
+    def _apply_migrations(self) -> None:
+        migrations_path = Path(__file__).resolve().parents[1] / "migrations"
+        MigrationRunner(self._connect, migrations_path).apply()
 
     def get_by_email(self, email: str) -> dict[str, object] | None:
         with self._connect() as connection:
