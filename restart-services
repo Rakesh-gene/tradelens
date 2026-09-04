@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+stop_port() {
+  local port="$1"
+  local pids
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser "$port"/tcp 2>/dev/null || true)"
+  else
+    pids=""
+  fi
+  if [[ -n "$pids" ]]; then
+    kill $pids || true
+    sleep 1
+    if command -v lsof >/dev/null 2>&1; then
+      pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    elif command -v fuser >/dev/null 2>&1; then
+      pids="$(fuser "$port"/tcp 2>/dev/null || true)"
+    else
+      pids=""
+    fi
+    if [[ -n "$pids" ]]; then
+      kill -9 $pids || true
+    fi
+  fi
+}
+
+stop_port 5004
+stop_port 9004
+
+(
+  cd "$ROOT_DIR/src/backend"
+  nohup "${PYTHON_BIN:-python3}" app.py > "$ROOT_DIR/backend.log" 2>&1 &
+  echo $! > "$ROOT_DIR/.backend.pid"
+)
+
+(
+  cd "$ROOT_DIR/src/frontend"
+  nohup npm run dev > "$ROOT_DIR/frontend.log" 2>&1 &
+  echo $! > "$ROOT_DIR/.frontend.pid"
+)
+
+echo "Restarted services on ports 9004 and 5004."
