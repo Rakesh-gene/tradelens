@@ -43,9 +43,9 @@ export default function LoginPage() {
       <section className="left-panel" aria-hidden="true">
         <header className="topbar">
           <div className="brand-lockup">
-            <div className="brand-mark">BP</div>
+            <div className="brand-mark">TL</div>
             <div>
-              <p className="brand-name">BananaPatterns</p>
+              <p className="brand-name">Tradelens</p>
               <p className="brand-meta">Watch the market show its hand.</p>
             </div>
           </div>
@@ -62,7 +62,7 @@ export default function LoginPage() {
           <h1>Sign in to the screen that measures the close.</h1>
           <p className="hero-description">
             A focused login for charts, scans, and the breakout record. Built
-            to feel like BananaPatterns, with the same calm, rules-first tone.
+            to feel like Tradelens, with the same calm, rules-first tone.
           </p>
         </div>
 
@@ -142,7 +142,7 @@ export default function LoginPage() {
         </div>
 
         <p className="legal-copy">
-          Not financial advice. BananaPatterns is a stock screening and market
+          Not financial advice. Tradelens is a stock screening and market
           analytics tool, not a recommendation engine.
         </p>
       </section>

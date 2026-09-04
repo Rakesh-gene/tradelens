@@ -43,7 +43,7 @@ export default function AuthForm({
       <div className="auth-card">
         <div className="login-header">
           <div>
-            <p className="panel-kicker">BananaPatterns</p>
+            <p className="panel-kicker">Tradelens</p>
             <h2>{title}</h2>
           </div>
           <p className="panel-subtitle">{description.subtitle}</p>
