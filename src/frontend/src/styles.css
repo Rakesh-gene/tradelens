@@ -322,11 +322,26 @@ button {
 .right-panel {
   display: grid;
   align-items: center;
+  gap: 1rem;
+}
+
+.auth-page {
+  display: grid;
+  align-items: center;
 }
 
 .login-card {
   padding: clamp(1.5rem, 4vw, 2.4rem);
   background: rgba(8, 10, 14, 0.78);
+}
+
+.auth-card {
+  padding: clamp(1.5rem, 4vw, 2.4rem);
+  border: 1px solid rgba(255, 236, 199, 0.1);
+  border-radius: 2rem;
+  background: rgba(8, 10, 14, 0.78);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.34);
 }
 
 .login-header {
@@ -517,6 +532,77 @@ button {
 .step-row p {
   margin: 0;
   color: rgba(246, 236, 214, 0.86);
+}
+
+.form-message {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  font-size: 0.95rem;
+}
+
+.form-message.success {
+  background: rgba(120, 197, 121, 0.14);
+  border: 1px solid rgba(120, 197, 121, 0.26);
+  color: #c6f7c8;
+}
+
+.form-message.error {
+  background: rgba(219, 94, 94, 0.14);
+  border: 1px solid rgba(219, 94, 94, 0.26);
+  color: #ffd1d1;
+}
+
+.auth-switch {
+  margin: 1rem 0 0;
+  color: rgba(246, 236, 214, 0.7);
+}
+
+.login-shell--signup {
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.9fr);
+}
+
+.signup-aside {
+  display: grid;
+  align-content: center;
+  gap: 1.25rem;
+  padding: clamp(1.75rem, 4.8vw, 4.5rem);
+  border: 1px solid rgba(255, 236, 199, 0.1);
+  border-radius: 2rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    linear-gradient(145deg, rgba(255, 216, 138, 0.12), rgba(16, 18, 20, 0.52));
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.34);
+}
+
+.signup-aside h1 {
+  margin: 0;
+  max-width: 12ch;
+  font-size: clamp(3rem, 7vw, 5.5rem);
+  line-height: 0.92;
+  letter-spacing: -0.07em;
+}
+
+.signup-notes {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.signup-notes article {
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(255, 236, 199, 0.12);
+  border-radius: 1.1rem;
+  background: rgba(11, 14, 18, 0.42);
+}
+
+.signup-notes strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.signup-notes p {
+  margin: 0;
+  color: rgba(246, 236, 214, 0.75);
 }
 
 .legal-copy {
