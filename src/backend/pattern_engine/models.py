@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping, TypeAlias
+from uuid import UUID
 
-from pattern_engine.enums import PatternClass, PatternState, SwingType, ZoneType
+from pattern_engine.enums import PatternClass, PatternEventType, PatternState, SwingType, ZoneType
 
 
 ScalarValue: TypeAlias = str | int | float | bool | None
@@ -19,6 +20,7 @@ SerializableValue: TypeAlias = (
     | date
     | datetime
     | Enum
+    | UUID
     | tuple["SerializableValue", ...]
     | Mapping[str, "SerializableValue"]
 )
@@ -33,6 +35,8 @@ def serialize_value(value: SerializableValue | object) -> object:
         return str(value)
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Mapping):
         return {str(key): serialize_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -259,6 +263,40 @@ class PatternInstance:
     configuration_version: str
     engine_version: str
     data_version: str
+    end_date: date | None = None
+    trigger_date: date | None = None
+    confirmation_date: date | None = None
+    terminal_date: date | None = None
+    state_version: int = 1
+    source_pattern_id: str | None = None
+    measurements: Mapping[str, SerializableValue] = field(default_factory=dict)
+    supporting_pattern_identifiers: tuple[str, ...] = ()
+    adjustment_version: str = ""
+    feature_version: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "measurements", _freeze_value(self.measurements))
+
+    def to_dict(self) -> dict[str, object]:
+        return serialize_value(self)  # type: ignore[return-value]
+
+
+@dataclass(frozen=True, slots=True)
+class PatternEvent:
+    event_id: str
+    pattern_instance_id: str
+    event_type: PatternEventType
+    state_version: int
+    previous_state: PatternState | None
+    new_state: PatternState
+    previous_values: Mapping[str, SerializableValue]
+    new_values: Mapping[str, SerializableValue]
+    effective_date: date
+    recorded_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "previous_values", _freeze_value(self.previous_values))
+        object.__setattr__(self, "new_values", _freeze_value(self.new_values))
 
     def to_dict(self) -> dict[str, object]:
         return serialize_value(self)  # type: ignore[return-value]

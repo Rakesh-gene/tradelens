@@ -21,6 +21,12 @@ class RecordingEquityRepository:
         return len(equities)
 
 
+class RecordingRunRepository:
+    def __init__(self): self.created = []; self.updated = []
+    def create_import_run(self, job_type, initiated_by, **values): self.created.append((job_type, initiated_by)); return "run-1"
+    def update_import_run(self, run_id, status, **values): self.updated.append((run_id, status, values))
+
+
 class NseDataCollectorTestCase(unittest.TestCase):
     def test_download_equities_parses_and_persists_csv(self) -> None:
         repository = RecordingEquityRepository()
@@ -30,6 +36,15 @@ class NseDataCollectorTestCase(unittest.TestCase):
         self.assertEqual(repository.equities[0]["symbol"], "20MICRONS")
         self.assertEqual(repository.equities[0]["listed_on"], date(2008, 10, 6))
         self.assertEqual(repository.equities[0]["market_lot"], 1)
+
+    def test_equity_master_import_records_observable_run_metrics(self) -> None:
+        runs = RecordingRunRepository()
+        collector = NseDataCollector(RecordingEquityRepository(), FakeNseClient(), run_repository=runs)
+        collector.download_equities()
+        self.assertEqual("EQUITY_MASTER", runs.created[0][0].value)
+        self.assertEqual("COMPLETED", runs.updated[-1][1].value)
+        self.assertEqual(1, runs.updated[-1][2]["rows_downloaded"])
+        self.assertIn("duration_ms", runs.updated[-1][2])
 
 
 if __name__ == "__main__":

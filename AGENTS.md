@@ -185,6 +185,31 @@ External exchange behavior is isolated in `data_pipeline/`.
   PEP-8 `download_equities()` alias when extending this collector.
 - Validate downloaded schemas before persisting rows. Do not store an HTML
   error response or malformed CSV as market data.
+- Full-universe reruns are incremental unless an administrator explicitly
+  requests a force refresh: plan price requests from each security's stored
+  maximum session, retain the configured historical floor as calculation
+  context, and refresh corporate actions with a bounded correction overlap.
+
+### Pattern-engine orchestration
+
+`pattern_engine/runner.py` is the only layer that coordinates the complete
+detector sequence. Keep individual detectors pure and point-in-time safe.
+
+- Preserve the stage order: supporting signals, bases, breakouts, pullbacks,
+  failures, scoring, lifecycle persistence, then expiry.
+- Use `PatternEngineRunner.run_security`, `run_changed`, `run_universe`, or
+  `replay` rather than recreating scan loops in HTTP handlers or jobs.
+- Live writes for one security must use the pattern repository's
+  `security_transaction()` boundary. A failure must roll back that security
+  while allowing other universe targets to continue.
+- Replay and dry-run modes must not write `pattern_instances` or
+  `pattern_events`. Their result must retain candidate measurements, scoring
+  contributions, and stage decisions.
+- Persist scan-level metrics on `market_import_runs` and individual failures in
+  `pattern_scan_failures`; do not reduce multi-security failures to logs alone.
+- Pass bounded benchmark history into `DetectionContext` so relative-strength
+  detectors remain date-aligned. Context scoring may rank candidates but must
+  never change detector geometry.
 
 ### Market-data ingestion and adjustment
 
@@ -268,6 +293,62 @@ canonical type/variant split; do not create near-duplicate type names.
 - Do not show probability-like claims for inadequate samples. Never derive
   historical probability from setup score.
 
+### Operations and recovery
+
+- Run operator commands from `src/backend` through `python -m operations.cli`;
+  use `python -m data_pipeline.cli` for history backfill and daily NSE sync.
+- `operations.cli status` is the canonical health summary. It reports the last
+  terminal run per job type, import checkpoints, open anomalies, and downstream
+  adjustment/feature/pattern lag.
+- Rebuild one security in dependency order through `rebuild-security`; never
+  rebuild patterns against stale adjustments or features manually.
+- Operational events are structured and secret-safe. Do not add authorization,
+  cookies, JWTs, passwords, connection strings, or raw NSE session state to an
+  event's details.
+- Use `benchmark-scan` with a bounded representative universe before proposing
+  a numeric dependency or performance-specific architecture change.
+- Backtest resume creates a linked run for the unprocessed suffix; completed
+  runs and their entries/outcomes remain immutable research evidence.
+
+### Cross-phase tests
+
+- Use `RELIANCE` / `INE002A01018` as the representative live NSE contract and
+  cross-phase integration security. Keep the reviewed source snapshot in
+  `src/backend/fixtures/nse/reliance_phase18_snapshot.json`.
+- Keep ordinary tests deterministic and offline. Live NSE validation is opt-in
+  through `data_pipeline.cli verify-nse-contract` or
+  `TRADELENS_RUN_LIVE_NSE_TESTS=1` and must not run in the normal CI job.
+- Every golden scenario needs a stable name, detection expectation, rationale,
+  and expected pivot, state, measurements, and scores. Maintain inventory
+  traceability in `fixtures/golden/pattern_scenarios.json`.
+- Run production-volume and full-universe benchmarks as explicit release gates,
+  not ordinary unit tests. Record versions, machine characteristics, row or
+  security counts, runtime, throughput, and failures.
+
+### Admin pipeline console
+
+- `/admin/pipeline` and every `/api/admin/...` endpoint are administrator-only;
+  hiding the navigation link is not an authorization boundary. Always enforce
+  `is_admin` at the HTTP boundary.
+- Admin-triggered full-pipeline runs execute asynchronously and persist a parent
+  run plus per-security stage/status rows. A slow NSE request must never hold
+  the initiating HTTP response open.
+- Preserve dependency order: history and corporate actions, adjusted bars,
+  features, swings/zones, then pattern detection and lifecycle persistence.
+- Isolate failures by security, cap one selection at 100 equities, and expose
+  progress through polling-friendly status endpoints. Never emit NSE cookies or
+  authentication material in run errors.
+- Universe-wide admin runs snapshot all currently eligible `EQ` securities and
+  process bounded batches with limited per-security concurrency. Keep every NSE
+  request start behind the shared client throttle, do not hold the rate-limit
+  lock while waiting for an HTTP response, and reuse universe-wide corporate
+  action responses; never create one unthrottled client per worker. Production
+  worker concurrency is configured by `ADMIN_PIPELINE_WORKERS` and is bounded
+  to 1-8. Persist `run_scope` plus `batch_size`. The 100-equity cap still
+  applies to explicit selections, not to the deliberate Run all operation.
+  Paginate per-security status; do not return the complete universe on every
+  polling request.
+
 ## Database and migrations
 
 PostgreSQL is the application database. The local Docker instance is configured
@@ -297,12 +378,11 @@ change.
   checks, and session restoration.
 - Page-level views belong in `src/frontend/src/pages/`.
 - Reusable form/UI behavior belongs in `src/frontend/src/components/`.
-- Keep the low-level `fetch` call in `src/frontend/src/api/apiClient.js` and use
-  domain API modules from pages/hooks. Generic presentational components never
-  fetch, read session storage, or navigate.
-- Keep `sessionStorage` ownership in `src/frontend/src/auth/`, History API
-  ownership in the app/routing boundary, and formatting/query parsing in pure
-  utilities.
+- Keep the low-level `fetch` call in `src/frontend/src/apiClient.js` and use
+  `useApiResource.js` for abortable, stale-response-safe page requests. Generic
+  presentational components never fetch, read session storage, or navigate.
+- Keep `sessionStorage` and History API ownership at the app/page boundary;
+  formatting and query parsing stay in focused pure utilities.
 - The access token is stored in `sessionStorage` under
   `tradelensAccessToken`. Sign-out must remove it and use
   `history.replaceState` before navigating to `/` so browser Back cannot reveal

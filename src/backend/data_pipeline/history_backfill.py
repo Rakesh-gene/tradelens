@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Iterable, Mapping
+from time import perf_counter
 
 from data_pipeline.normalization import corporate_action_record, raw_bar_record
 from data_pipeline.nse_api import NseApiClient
@@ -14,6 +15,7 @@ from repositories.market_data import MarketDataRepository
 
 ELIGIBLE_SERIES = frozenset({"EQ"})
 LONG_GAP_DAYS = 7
+ACTION_REPAIR_DAYS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +62,12 @@ class HistoryBackfillService:
         repository: MarketDataRepository,
         nse_client: NseApiClient | None = None,
         *,
+        event_logger=None,
         today: Callable[[], date] = date.today,
     ) -> None:
         self._repository = repository
         self._nse_client = nse_client or NseApiClient()
+        self._event_logger = event_logger
         self._today = today
 
     def plan(self, request: BackfillRequest) -> list[SecurityBackfillResult]:
@@ -74,6 +78,7 @@ class HistoryBackfillService:
         return [self._plan_security(security, request) for security in securities]
 
     def run(self, request: BackfillRequest) -> BackfillRunResult:
+        started = perf_counter()
         plans = self.plan(request)
         if request.dry_run:
             return BackfillRunResult(None, None, tuple(plans))
@@ -101,16 +106,30 @@ class HistoryBackfillService:
         results: list[SecurityBackfillResult] = []
         for batch in _batches(plans, request.batch_size):
             for plan in batch:
+                security_started = perf_counter(); error_class = None
+                attempt = int((self._repository.get_import_checkpoint(ImportJobType.HISTORY_BACKFILL, plan.isin) or {}).get("retry_count") or 0) + 1
                 try:
                     self._import_security(plan, run_id)
                     completed += 1
                     downloaded += plan.rows_downloaded
                     inserted += plan.rows_inserted + plan.actions_inserted
                 except Exception as error:  # a failed security must not abort the universe
+                    error_class = type(error).__name__
                     plan.error = self._error_summary(error)
                     failed += 1
                     rejected += 1
                     self._record_failure(plan, run_id)
+                if self._event_logger:
+                    self._event_logger.emit(
+                        "history_security_completed" if not plan.error else "history_security_failed",
+                        level="INFO" if not plan.error else "ERROR", run_id=run_id,
+                        job_type=ImportJobType.HISTORY_BACKFILL.value, isin=plan.isin, symbol=plan.symbol,
+                        requested_from_date=plan.requested_from_date, requested_to_date=plan.requested_to_date,
+                        attempt=attempt,
+                        duration_ms=round((perf_counter() - security_started) * 1000),
+                        row_count=plan.rows_downloaded, source_status="OK" if not plan.error else "FAILED",
+                        error_class=error_class, details={"error": plan.error} if plan.error else {},
+                    )
                 results.append(plan)
                 self._repository.update_import_run(
                     run_id,
@@ -135,6 +154,8 @@ class HistoryBackfillService:
             rows_inserted=inserted,
             rows_rejected=rejected,
             error_summary=summary,
+            duration_ms=round((perf_counter() - started) * 1000),
+            source_metrics=getattr(self._nse_client, "metrics", {}),
         )
         return BackfillRunResult(run_id, status, tuple(results))
 
@@ -188,7 +209,10 @@ class HistoryBackfillService:
             bars_by_date = {bar.trading_date: bar for bar in bars}
             ordered_bars = [bars_by_date[trading_date] for trading_date in sorted(bars_by_date)]
             self._validate_bars(result, ordered_bars, chunk_from, chunk_to)
-            raw_bars = [raw_bar_record(bar, result.isin, run_id) for bar in ordered_bars]
+            raw_bars = [
+                raw_bar_record(bar, result.isin, run_id, expected_symbol=result.symbol)
+                for bar in ordered_bars
+            ]
             self._repository.persist_history_chunk(
                 raw_bars,
                 self._successful_checkpoint(
@@ -208,21 +232,53 @@ class HistoryBackfillService:
             ImportJobType.CORPORATE_ACTION_BACKFILL, result.isin
         )
         if not self._checkpoint_covers(action_checkpoint, result.requested_from_date, result.requested_to_date):
-            actions = self._nse_client.fetch_corporate_actions(
-                result.symbol, result.requested_from_date, result.requested_to_date
+            action_from = self._action_refresh_start(
+                action_checkpoint, result.requested_from_date
             )
-            mapped_actions = [corporate_action_record(action, result.isin, run_id) for action in actions]
+            actions = self._nse_client.fetch_corporate_actions(
+                result.symbol, action_from, result.requested_to_date
+            )
+            mapped_actions = [
+                corporate_action_record(
+                    action, result.isin, run_id, expected_symbol=result.symbol
+                )
+                for action in actions
+            ]
             result.actions_inserted = self._repository.upsert_corporate_actions(mapped_actions)
             self._repository.upsert_import_checkpoint(self._successful_checkpoint(
                 ImportJobType.CORPORATE_ACTION_BACKFILL,
                 result.isin,
-                result.requested_from_date,
+                self._continuous_coverage_start(
+                    action_checkpoint, result.requested_from_date
+                ),
                 result.requested_to_date,
                 (),
                 run_id,
             ))
         if all_dates:
             self._report_long_gaps(result, sorted(set(all_dates)))
+
+    @staticmethod
+    def _action_refresh_start(
+        checkpoint: Mapping[str, object] | None, requested_from: date
+    ) -> date:
+        """Use a short overlap to catch recent NSE action corrections."""
+
+        if checkpoint and checkpoint.get("status") == ImportStatus.COMPLETED.value:
+            attempted_to = checkpoint.get("last_attempted_to_date")
+            if isinstance(attempted_to, date):
+                return max(requested_from, attempted_to - timedelta(days=ACTION_REPAIR_DAYS))
+        return requested_from
+
+    @staticmethod
+    def _continuous_coverage_start(
+        checkpoint: Mapping[str, object] | None, requested_from: date
+    ) -> date:
+        if checkpoint and checkpoint.get("status") == ImportStatus.COMPLETED.value:
+            attempted_from = checkpoint.get("last_attempted_from_date")
+            if isinstance(attempted_from, date):
+                return min(requested_from, attempted_from)
+        return requested_from
 
     @staticmethod
     def _missing_ranges(

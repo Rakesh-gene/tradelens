@@ -105,6 +105,9 @@ class MarketDataRepository(Protocol):
         rows_rejected: int | None = None,
         error_summary: str | None = None,
         finished_at: datetime | None = None,
+        duration_ms: int | None = None,
+        source_metrics: Mapping[str, object] | None = None,
+        stage_metrics: Mapping[str, object] | None = None,
     ) -> None:
         ...
 
@@ -115,6 +118,18 @@ class MarketDataRepository(Protocol):
         ...
 
     def list_affected_security_dates(self, run_id: str) -> list[dict[str, object]]:
+        ...
+
+    def load_benchmark_snapshot(self, from_date: date, as_of_date: date) -> dict[str, object]:
+        ...
+
+    def load_sector_snapshot(self, isin: str, as_of_date: date) -> dict[str, object] | None:
+        ...
+
+    def update_pattern_scan_metrics(self, run_id: str, metrics: Mapping[str, object]) -> None:
+        ...
+
+    def record_pattern_scan_failure(self, failure: Mapping[str, object]) -> None:
         ...
 
 
@@ -182,17 +197,18 @@ class PostgresMarketDataRepository:
             return 0
         statement = """
             INSERT INTO nse_corporate_actions (
-                source_event_key, isin, symbol, action_type, ex_date, record_date,
+                source_event_key, isin, source_isin, symbol, action_type, ex_date, record_date,
                 announcement_date, numerator, denominator, cash_value, currency,
                 raw_description, raw_payload, source_checksum, import_run_id
             ) VALUES (
-                %(source_event_key)s, %(isin)s, %(symbol)s, %(action_type)s, %(ex_date)s,
+                %(source_event_key)s, %(isin)s, %(source_isin)s, %(symbol)s, %(action_type)s, %(ex_date)s,
                 %(record_date)s, %(announcement_date)s, %(numerator)s, %(denominator)s,
                 %(cash_value)s, %(currency)s, %(raw_description)s,
                 %(raw_payload)s::jsonb, %(source_checksum)s, %(import_run_id)s
             )
             ON CONFLICT (source_event_key) DO UPDATE SET
                 isin = EXCLUDED.isin,
+                source_isin = EXCLUDED.source_isin,
                 symbol = EXCLUDED.symbol,
                 action_type = EXCLUDED.action_type,
                 ex_date = EXCLUDED.ex_date,
@@ -222,13 +238,13 @@ class PostgresMarketDataRepository:
         self, isin: str, from_date: date, to_date: date, *, as_of: datetime | None = None
     ) -> list[dict[str, object]]:
         statement = """
-            SELECT source_event_key, isin, symbol, action_type, ex_date, record_date,
+            SELECT source_event_key, isin, source_isin, symbol, action_type, ex_date, record_date,
                    announcement_date, numerator, denominator, cash_value, currency,
                    raw_description, raw_payload, source_checksum, import_run_id,
                    imported_at, updated_at
             FROM nse_corporate_actions
             WHERE isin = %s AND ex_date >= %s AND ex_date <= %s
-              AND (%s IS NULL OR imported_at <= %s)
+              AND (%s::timestamptz IS NULL OR imported_at <= %s::timestamptz)
             ORDER BY ex_date, source_event_key
         """
         return self._fetch_all(statement, (isin, from_date, to_date, as_of, as_of))
@@ -322,7 +338,7 @@ class PostgresMarketDataRepository:
     ) -> list[dict[str, object]]:
         return self._fetch_all("""
             SELECT * FROM swing_points WHERE isin = %s AND pivot_date >= %s AND pivot_date <= %s
-              AND feature_version = %s AND (%s IS NULL OR confirmation_date <= %s)
+              AND feature_version = %s AND (%s::date IS NULL OR confirmation_date <= %s::date)
             ORDER BY pivot_date, swing_type
         """, (isin, from_date, to_date, feature_version, as_of, as_of))
 
@@ -350,7 +366,7 @@ class PostgresMarketDataRepository:
     ) -> list[dict[str, object]]:
         return self._fetch_all("""
             SELECT * FROM price_zones WHERE isin = %s AND last_test_date >= %s AND last_test_date <= %s
-              AND feature_version = %s AND (%s IS NULL OR confirmation_date <= %s)
+              AND feature_version = %s AND (%s::date IS NULL OR confirmation_date <= %s::date)
             ORDER BY zone_type, median_price, start_date
         """, (isin, from_date, to_date, feature_version, as_of, as_of))
 
@@ -447,12 +463,15 @@ class PostgresMarketDataRepository:
         rows_rejected: int | None = None,
         error_summary: str | None = None,
         finished_at: datetime | None = None,
+        duration_ms: int | None = None,
+        source_metrics: Mapping[str, object] | None = None,
+        stage_metrics: Mapping[str, object] | None = None,
     ) -> None:
         statement = """
             UPDATE market_import_runs
             SET status = %(status)s,
                 finished_at = CASE
-                    WHEN %(finished_at)s IS NOT NULL THEN %(finished_at)s
+                    WHEN %(finished_at)s::timestamptz IS NOT NULL THEN %(finished_at)s::timestamptz
                     WHEN %(status)s IN ('COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED') THEN NOW()
                     ELSE finished_at
                 END,
@@ -463,7 +482,10 @@ class PostgresMarketDataRepository:
                 rows_inserted = COALESCE(%(rows_inserted)s, rows_inserted),
                 rows_updated = COALESCE(%(rows_updated)s, rows_updated),
                 rows_rejected = COALESCE(%(rows_rejected)s, rows_rejected),
-                error_summary = COALESCE(%(error_summary)s, error_summary)
+                error_summary = COALESCE(%(error_summary)s, error_summary),
+                duration_ms = COALESCE(%(duration_ms)s, duration_ms),
+                source_metrics = COALESCE(%(source_metrics)s::jsonb, source_metrics),
+                stage_metrics = COALESCE(%(stage_metrics)s::jsonb, stage_metrics)
             WHERE id = %(run_id)s
         """
         parameters = {
@@ -478,6 +500,9 @@ class PostgresMarketDataRepository:
             "rows_updated": rows_updated,
             "rows_rejected": rows_rejected,
             "error_summary": error_summary,
+            "duration_ms": duration_ms,
+            "source_metrics": json.dumps(serialize_value(source_metrics), sort_keys=True) if source_metrics is not None else None,
+            "stage_metrics": json.dumps(serialize_value(stage_metrics), sort_keys=True) if stage_metrics is not None else None,
         }
         self._execute(statement, parameters)
 
@@ -576,6 +601,61 @@ class PostgresMarketDataRepository:
         """
         return self._fetch_all(statement, (run_id, run_id))
 
+    def load_benchmark_snapshot(self, from_date: date, as_of_date: date) -> dict[str, object]:
+        """Return bounded broad-index history for point-in-time signals and context."""
+
+        rows = self._fetch_all(
+            """
+            SELECT index_code, trading_date, open_price, high_price, low_price, close_price
+            FROM index_daily_bars
+            WHERE index_code = (
+                SELECT code FROM market_indices
+                ORDER BY CASE code WHEN 'NIFTY 500' THEN 0 WHEN 'NIFTY 50' THEN 1 ELSE 2 END,
+                         code
+                LIMIT 1
+            )
+              AND trading_date >= %s AND trading_date <= %s
+            ORDER BY trading_date
+            """,
+            (from_date, as_of_date),
+        )
+        return {"index_code": rows[-1]["index_code"], "bars": rows} if rows else {"bars": []}
+
+    def load_sector_snapshot(self, isin: str, as_of_date: date) -> dict[str, object] | None:
+        rows = self._fetch_all(
+            """
+            SELECT membership.sector_code, sector.name AS sector_name
+            FROM security_sector_memberships AS membership
+            JOIN market_sectors AS sector ON sector.code = membership.sector_code
+            WHERE membership.isin = %s
+              AND membership.effective_from <= %s
+              AND (membership.effective_to IS NULL OR membership.effective_to >= %s)
+            ORDER BY membership.effective_from DESC, membership.sector_code
+            LIMIT 1
+            """,
+            (isin, as_of_date, as_of_date),
+        )
+        return rows[0] if rows else None
+
+    def update_pattern_scan_metrics(self, run_id: str, metrics: Mapping[str, object]) -> None:
+        self._execute(
+            "UPDATE market_import_runs SET metrics = %s::jsonb WHERE id = %s",
+            (json.dumps(serialize_value(metrics), sort_keys=True), run_id),
+        )
+
+    def record_pattern_scan_failure(self, failure: Mapping[str, object]) -> None:
+        self._execute(
+            """
+            INSERT INTO pattern_scan_failures (
+                id, run_id, isin, as_of_date, stage, error_type, error_message
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                str(uuid4()), failure["run_id"], failure["isin"], failure["as_of_date"],
+                failure["stage"], failure["error_type"], failure["error_message"],
+            ),
+        )
+
     def _load_bars(
         self, table_name: str, isin: str, from_date: date, to_date: date
     ) -> list[dict[str, object]]:
@@ -589,7 +669,7 @@ class PostgresMarketDataRepository:
         """
         return self._fetch_all(statement, (isin, from_date, to_date))
 
-    def _execute(self, statement: str, parameters: Mapping[str, object]) -> None:
+    def _execute(self, statement: str, parameters: object) -> None:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(statement, parameters)
@@ -608,16 +688,17 @@ class PostgresMarketDataRepository:
     ) -> None:
         statement = """
             INSERT INTO nse_daily_bars_raw (
-                isin, trading_date, open_price, high_price, low_price, close_price,
+                isin, source_isin, trading_date, open_price, high_price, low_price, close_price,
                 volume, deliverable_quantity, delivery_percentage, nse_series,
                 source_name, source_checksum, source_published_at, import_run_id
             ) VALUES (
-                %(isin)s, %(trading_date)s, %(open_price)s, %(high_price)s, %(low_price)s,
+                %(isin)s, %(source_isin)s, %(trading_date)s, %(open_price)s, %(high_price)s, %(low_price)s,
                 %(close_price)s, %(volume)s, %(deliverable_quantity)s,
                 %(delivery_percentage)s, %(nse_series)s, %(source_name)s,
                 %(source_checksum)s, %(source_published_at)s, %(import_run_id)s
             )
             ON CONFLICT (isin, trading_date) DO UPDATE SET
+                source_isin = EXCLUDED.source_isin,
                 open_price = EXCLUDED.open_price,
                 high_price = EXCLUDED.high_price,
                 low_price = EXCLUDED.low_price,
@@ -640,6 +721,7 @@ class PostgresMarketDataRepository:
     def _raw_bar_parameters(bar: Mapping[str, object]) -> dict[str, object]:
         return {
             "isin": bar["isin"],
+            "source_isin": bar.get("source_isin"),
             "trading_date": bar["trading_date"],
             "open_price": bar["open_price"],
             "high_price": bar["high_price"],
@@ -660,6 +742,7 @@ class PostgresMarketDataRepository:
         return {
             "source_event_key": action["source_event_key"],
             "isin": action["isin"],
+            "source_isin": action.get("source_isin"),
             "symbol": action["symbol"],
             "action_type": action["action_type"],
             "ex_date": action["ex_date"],

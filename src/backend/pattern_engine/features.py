@@ -135,6 +135,23 @@ def assign_relative_strength_percentiles(
     rows: Sequence[dict[str, object]], eligible_isins: set[str] | None = None
 ) -> None:
     """Assign deterministic cross-sectional percentiles; equal scores share rank."""
+    dates = {row.get("trading_date") for row in rows}
+    if len(dates) > 1:
+        raise ValueError("Rank one as-of date at a time")
+    for row in rows:
+        secondary = dict(row.get("secondary_metrics") or {})
+        for horizon in ("1m", "3m", "6m", "12m"):
+            secondary.pop(f"rs_{horizon}_percentile", None)
+        row["secondary_metrics"] = secondary
+    for horizon in ("1m", "3m", "6m", "12m"):
+        cohort = [row for row in rows if row.get(f"relative_strength_{horizon}") is not None
+                  and (eligible_isins is None or row.get("isin") in eligible_isins)]
+        scores = sorted(_decimal(row[f"relative_strength_{horizon}"]) for row in cohort)
+        for row in cohort:
+            score = _decimal(row[f"relative_strength_{horizon}"])
+            # Shared midrank preserves ties while counting every eligible security.
+            rank = _decimal(sum(value < score for value in scores)) + _decimal(sum(value == score for value in scores) - 1) / 2
+            row["secondary_metrics"][f"rs_{horizon}_percentile"] = rank / max(1, len(scores) - 1) * 100
     eligible = [
         row for row in rows
         if row.get("relative_strength_composite") is not None

@@ -15,6 +15,8 @@ from data_pipeline.nse_data_collector import NseDataCollector
 from pattern_engine.enums import ImportStatus
 from repositories.equities import PostgresEquityRepository
 from repositories.market_data import PostgresMarketDataRepository
+from repositories.operations import PostgresOperationsRepository
+from operations.monitoring import StructuredEventLogger
 from server import load_local_environment
 
 
@@ -40,12 +42,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     daily.add_argument("--isin")
     daily.add_argument("--max-securities", type=int)
     daily.add_argument("--dry-run", action="store_true")
+    contract = subparsers.add_parser(
+        "verify-nse-contract", help="Run an opt-in live NSE parser contract check"
+    )
+    contract.add_argument("--symbol", default="RELIANCE")
+    contract.add_argument("--from-date", type=_parse_date, default=date(2024, 1, 1))
+    contract.add_argument("--to-date", type=_parse_date, default=date(2024, 1, 5))
+    contract.add_argument("--actions-from", type=_parse_date, default=date(2024, 7, 1))
+    contract.add_argument("--actions-to", type=_parse_date, default=date(2024, 11, 30))
     arguments = parser.parse_args(argv)
 
     if arguments.command == "backfill-history":
         return _backfill_history(arguments)
     if arguments.command == "sync-daily":
         return _sync_daily(arguments)
+    if arguments.command == "verify-nse-contract":
+        return _verify_nse_contract(arguments)
     parser.error("Unsupported command")
     return 2
 
@@ -75,10 +87,11 @@ def _backfill_history(arguments: argparse.Namespace) -> int:
         raise SystemExit("DATABASE_URL is required for market-data imports")
 
     repository = PostgresMarketDataRepository(dsn, apply_migrations=not request.dry_run)
+    event_logger = StructuredEventLogger(PostgresOperationsRepository(dsn, apply_migrations=False)) if not request.dry_run else None
     client = NseApiClient()
     if not request.dry_run:
-        NseDataCollector(PostgresEquityRepository(dsn), client).download_equities()
-    result = HistoryBackfillService(repository, client).run(request)
+        NseDataCollector(PostgresEquityRepository(dsn), client, run_repository=repository).download_equities()
+    result = HistoryBackfillService(repository, client, event_logger=event_logger).run(request)
     print(json.dumps({
         "runId": result.run_id,
         "status": result.status.value if result.status else "DRY_RUN",
@@ -120,10 +133,11 @@ def _sync_daily(arguments: argparse.Namespace) -> int:
         max_securities=arguments.max_securities, dry_run=arguments.dry_run,
     )
     repository = PostgresMarketDataRepository(dsn, apply_migrations=not request.dry_run)
+    event_logger = StructuredEventLogger(PostgresOperationsRepository(dsn, apply_migrations=False)) if not request.dry_run else None
     client = NseApiClient()
     if not request.dry_run:
-        NseDataCollector(PostgresEquityRepository(dsn), client).download_equities()
-    result = DailyDeltaService(repository, client).run(request)
+        NseDataCollector(PostgresEquityRepository(dsn), client, run_repository=repository).download_equities()
+    result = DailyDeltaService(repository, client, event_logger=event_logger).run(request)
     print(json.dumps({
         "runId": result.run_id,
         "status": result.status.value if result.status else "DRY_RUN",
@@ -146,6 +160,37 @@ def _years_before(value: date, years: int) -> date:
         return value.replace(year=value.year - years)
     except ValueError:  # 29 February
         return value.replace(year=value.year - years, month=2, day=28)
+
+
+def _verify_nse_contract(arguments: argparse.Namespace) -> int:
+    """Exercise the real NSE boundary without mutating application storage."""
+
+    client = NseApiClient()
+    history = client.fetch_equity_history(
+        arguments.symbol, arguments.from_date, arguments.to_date
+    )
+    actions = client.fetch_corporate_actions(
+        arguments.symbol, arguments.actions_from, arguments.actions_to
+    )
+    payload = {
+        "symbol": arguments.symbol.strip().upper(),
+        "history": {
+            "rows": len(history),
+            "firstDate": history[0].trading_date.isoformat() if history else None,
+            "lastDate": history[-1].trading_date.isoformat() if history else None,
+        },
+        "corporateActions": [
+            {
+                "type": action.action_type,
+                "exDate": action.ex_date.isoformat(),
+                "description": action.raw_description,
+            }
+            for action in actions
+        ],
+        "sourceMetrics": client.metrics,
+    }
+    print(json.dumps(payload, indent=2))
+    return 0 if history else 1
 
 
 if __name__ == "__main__":

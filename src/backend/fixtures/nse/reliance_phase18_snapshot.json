@@ -1,0 +1,23 @@
+{
+  "source": "NSE",
+  "sourceUrl": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi",
+  "retrievedAt": "2026-09-05",
+  "symbol": "RELIANCE",
+  "isin": "INE002A01018",
+  "historyRequest": {
+    "fromDate": "01-01-2024",
+    "toDate": "05-01-2024",
+    "series": "EQ"
+  },
+  "history": [
+    {"ch52WeekHighPrice":2634,"ch52WeekLowPrice":2220.3,"chClosingPrice":2607.7,"chLastTradedPrice":2609,"chOpeningPrice":2602.9,"chPreviousClsPrice":2596.65,"chSeries":"EQ","chSymbol":"RELIANCE","chTotTradedQty":4043203,"chTotTradedVal":10539886698.05,"chTotalTrades":211413,"chTradeHighPrice":2619.85,"chTradeLowPrice":2598,"mtimestamp":"05-Jan-2024","vwap":2606.82},
+    {"ch52WeekHighPrice":2634,"ch52WeekLowPrice":2220.3,"chClosingPrice":2596.65,"chLastTradedPrice":2600,"chOpeningPrice":2588,"chPreviousClsPrice":2583.3,"chSeries":"EQ","chSymbol":"RELIANCE","chTotTradedQty":4806389,"chTotTradedVal":12483971502.55,"chTotalTrades":267185,"chTradeHighPrice":2609.85,"chTradeLowPrice":2579.1,"mtimestamp":"04-Jan-2024","vwap":2597.37},
+    {"ch52WeekHighPrice":2634,"ch52WeekLowPrice":2220.3,"chClosingPrice":2583.3,"chLastTradedPrice":2580.75,"chOpeningPrice":2610,"chPreviousClsPrice":2611.7,"chSeries":"EQ","chSymbol":"RELIANCE","chTotTradedQty":4518768,"chTotTradedVal":11778006447.25,"chTotalTrades":198303,"chTradeHighPrice":2634,"chTradeLowPrice":2577.2,"mtimestamp":"03-Jan-2024","vwap":2606.46},
+    {"ch52WeekHighPrice":2630.95,"ch52WeekLowPrice":2220.3,"chClosingPrice":2611.7,"chLastTradedPrice":2609,"chOpeningPrice":2585,"chPreviousClsPrice":2590.25,"chSeries":"EQ","chSymbol":"RELIANCE","chTotTradedQty":3724400,"chTotTradedVal":9671331567.5,"chTotalTrades":175872,"chTradeHighPrice":2615,"chTradeLowPrice":2573,"mtimestamp":"02-Jan-2024","vwap":2596.75},
+    {"ch52WeekHighPrice":2630.95,"ch52WeekLowPrice":2220.3,"chClosingPrice":2590.25,"chLastTradedPrice":2588.45,"chOpeningPrice":2580.55,"chPreviousClsPrice":2584.95,"chSeries":"EQ","chSymbol":"RELIANCE","chTotTradedQty":2015270,"chTotTradedVal":5215808110.05,"chTotalTrades":115559,"chTradeHighPrice":2606.85,"chTradeLowPrice":2573.15,"mtimestamp":"01-Jan-2024","vwap":2588.14}
+  ],
+  "corporateActions": [
+    {"bcEndDate":"-","bcStartDate":"-","caBroadcastDate":null,"comp":"Reliance Industries Limited","exDate":"19-Aug-2024","faceVal":"10","ind":"-","isin":"INE002A01018","ndEndDate":"-","ndStartDate":"-","recDate":"19-Aug-2024","series":"EQ","subject":"Dividend - Rs 10 Per Share","symbol":"RELIANCE"},
+    {"bcEndDate":"-","bcStartDate":"-","caBroadcastDate":null,"comp":"Reliance Industries Limited","exDate":"28-Oct-2024","faceVal":"10","ind":"-","isin":"INE002A01018","ndEndDate":"-","ndStartDate":"-","recDate":"28-Oct-2024","series":"EQ","subject":"Bonus 1:1","symbol":"RELIANCE"}
+  ]
+}

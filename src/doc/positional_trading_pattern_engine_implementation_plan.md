@@ -862,6 +862,33 @@ Create `swing_points` and `price_zones` with input/configuration versioning.
 
 # Phase 8 — Supporting pattern detectors
 
+## Review status — complete
+
+Reviewed again after correcting the recorded findings. All 88 backend tests
+pass, including the Phase 8/9 acceptance regressions.
+
+- [x] All thirteen supporting identifiers produce dated measurement evidence.
+- [x] RS breakout inputs use `context.benchmark_snapshot["bars"]`, containing
+  dated benchmark closes. Stock and benchmark sessions align by date; missing
+  sessions suppress the affected horizon. Independent 20/50/252-session
+  variants handle short stock histories safely and ignore future inputs.
+- [x] HHHL durations count supplied trading sessions and pullbacks pair a high
+  with its subsequent low. Stage-2 averages use calendar-week closing values.
+- [x] The cross-sectional feature helper ranks eligible securities separately
+  for each horizon, preserving ties, and stores `rs_1m_percentile` through
+  `rs_12m_percentile` in `secondary_metrics`. MOM-RSL exposes the weighted
+  10/25/35/30 composite and each contribution. Rank one as-of date per call.
+- [x] Inside-bar variants use `COMP-IB1/2/3`; NR7 compares percentage ranges;
+  configurable MA conditions include SMA100; momentum acceleration exposes a
+  continuous bounded score and contributions.
+- [x] Positive, negative, missing-data and boundary fixtures exercise supporting
+  rules with matching as-of dates, including independent RS horizons, equal
+  ranges, equal momentum pace, threshold equality, and replay isolation.
+
+Integration contract: supply benchmark bars and ranked per-horizon feature
+fields to the pure detector service. Universe scheduling and candidate
+persistence belong to the later orchestration/lifecycle phases.
+
 ## Objective
 
 Implement the reusable technical state that primary patterns and context scores
@@ -906,6 +933,35 @@ described as institutional buying.
 ---
 
 # Phase 9 — Primary base detectors
+
+## Review status — complete
+
+Reviewed again after correcting the recorded findings. All 88 backend tests
+pass, including duration, geometry and successive-session regressions.
+
+- [x] All three base families expose geometry, pivots, support, invalidation
+  and named quality contributions; VCP also exposes maturity contributions.
+- [x] VCP searches recent suffixes of two through five contractions, allowing
+  a recent eligible base even when an older contraction is outside the window.
+- [x] A progressing base followed by excessive contraction expansion emits
+  INVALIDATED evidence; the progression filter no longer hides that failure.
+- [x] Flat-base depth/flatness breaks retain invalidation evidence when the
+  preceding window satisfied the geometry limits. Invalidated candidates take
+  precedence over competing active windows in the same scan.
+- [x] Resistance candidates must fall within the zone's percentage tolerance
+  of the final swing high. Distant historical resistance is excluded.
+- [x] Flat-base dispersion uses population standard deviation divided by mean
+  of the supplied source swing prices. Missing source evidence remains null.
+- [x] Tests cover VCP counts 2–5, exact 20/90-session and 8/35-percent limits,
+  flat-base 20/60-session and 15-percent limits, near-high 20/80-session windows
+  and 60-percent persistence, progression equality, and trigger equality.
+- [x] Separate session advances verify READY, TRIGGERED, CONFIRMED and
+  INVALIDATED evidence. Replay tests exclude unconfirmed swings and future
+  inputs; confirmation requires the final contraction to have been known on
+  the earlier confirming session.
+
+Candidate evidence remains side-effect free. Persisted instance matching,
+terminal-state retention and event history remain owned by Phase 13.
 
 ## Objective
 
@@ -957,6 +1013,37 @@ quality, maturity, pivot, and invalidation evidence.
 
 # Phase 10 — Breakout detectors
 
+## Review status — complete
+
+Reviewed against the canonical breakout rules after correcting the recorded
+findings. All 103 backend tests pass, including focused Phase 10/11 replay and
+event-time regressions.
+
+- [x] BRK-RANGE, BRK-52WH, BRK-ATH, and all BRK-MULTIY variants use
+  the same breakout core; adapters provide only pivot/source metadata.
+- [x] Prior-high calculations exclude the current session. Range resistance
+  requires a confirmed zone with at least two tests and 20–120-session age.
+- [x] Multi-year variants use 504/756/1,260-session windows and record the age
+  of the latest qualifying historical resistance test plus historical count.
+- [x] The strict buffered-close boundary, ATR magnitude, VolumeRatio20, CLV,
+  range expansion, extension flag, and named quality contributions are
+  recorded. Breakout-candle quality remains anchored to the trigger session.
+- [x] Optional originating base evidence is matched point-in-time by security
+  and pivot proximity and contributes independently from resistance quality.
+- [x] The first valid buffered close is always TRIGGERED. Confirmation cannot
+  occur until a later session and requires two closes above pivot or a strong
+  breakout close whose next session does not fail.
+- [x] Five-session failure monitoring uses the buffered pivot. FAIL-BRK
+  records breakout-candle and failure-session volume separately and marks
+  strong failure only when both price and failure-volume rules pass.
+- [x] Tests cover equality at the breakout threshold, a valid cross following
+  an intermediate close above pivot, trigger-to-confirm/fail transitions,
+  stable trigger evidence, source-base linkage, historical resistance age,
+  incomplete history, and future-input isolation.
+
+Candidate persistence, terminal-state retention, and event history remain
+owned by Phase 13.
+
 ## Objective
 
 Build one generic breakout engine and reuse it for different resistance sources.
@@ -999,6 +1086,41 @@ Inputs include pivot source, zone quality, source base, and lookback. Calculate:
 
 # Phase 11 — Pullback detectors
 
+## Review status — complete
+
+Reviewed against the canonical pullback requirements after correcting
+event-time, source-linkage, and variant-identifier gaps. The complete
+103-test backend suite passes.
+
+- [x] PB-BRKRET accepts only persisted, confirmed, same-security breakout
+  instances visible at the replay as-of date and records their instance ID,
+  type, variant, pivot, breakout date, and original quality.
+- [x] Maximum advance satisfies both sides of max(3%, 1 × ATR14) using
+  breakout-date ATR. Retest touches before session three are ignored; the
+  valid 3–30 and preferred 5–20 windows are measured from the breakout.
+- [x] Breakout retests use the configured NATR clamp, pullback volume evidence,
+  FORMING/READY/TRIGGERED states, conservative buffered retest-high trigger,
+  and both specified invalidation paths.
+- [x] PB-EMA20 validates EMA20/SMA50/SMA200 alignment, positive slopes, 10 of
+  15 prior closes, 3–12% depth, 2–10-session duration, clamped touch proximity,
+  pullback volume, closing behavior, two-session trigger, and persistent or
+  structural invalidation.
+- [x] PB-SMA50 validates SMA50/SMA200 trend requirements, 70% of 40 prior
+  closes, 5–20% depth, 3–20-session duration, bounce and invalidation rules.
+  Distinct 126-session touch episodes are separated by at least ten sessions.
+- [x] SMA50 variants use the stable identifiers PB-SMA50-T1, PB-SMA50-T2,
+  and PB-SMA50-T3+.
+- [x] Moving-average candidates preserve supplied trend identifiers and record
+  their confirmed source swing and prerequisite evidence without inventing
+  unsupported pattern links.
+- [x] EMA20 invalidation and a separate SMA50 candidate coexist in one scan.
+  Tests also cover conservative triggers, source confirmation visibility,
+  early-retest exclusion, breakout-ATR anchoring, touch episodes, and future
+  swing/bar isolation.
+
+Lifecycle deduplication, expiry after maximum duration, and persisted source
+state transitions remain owned by Phase 13.
+
 ## `PB-BRKRET`
 
 - Requires a persisted confirmed source breakout.
@@ -1038,6 +1160,27 @@ Inputs include pivot source, zone quality, source base, and lookback. Calculate:
 
 # Phase 12 — Failure detectors
 
+## Review status — complete
+
+Reviewed against the Phase 12 detector rules and exit expectations on
+2026-09-05. The implementation is complete.
+
+- [x] `FAIL-BRK` records the original pivot, maximum post-breakout advance,
+  sessions above pivot, failure depth and volume, breakout-candle failure, and
+  relative-strength deterioration.
+- [x] `FAIL-BASE` uses the source instance's exact invalidation price when it is
+  available and otherwise applies the recorded/configured support tolerance.
+- [x] `FAIL-EMA20` requires two closes below EMA20 plus greater-than-one-ATR
+  penetration or a confirmed meaningful swing-low break.
+- [x] `FAIL-SMA50` requires two closes below SMA50 with at least one-ATR
+  penetration and records non-positive slope as stronger failure evidence.
+- [x] `FAIL-STRUCT` uses the latest point-in-time-visible confirmed meaningful
+  swing low.
+- [x] Every failure candidate links its source pattern instance when one exists,
+  while source lifecycle mutation remains outside the detectors.
+- [x] Boundary, evidence, source-link, invalidation-precedence, and
+  point-in-time regression tests pass.
+
 Implement independent candidates for:
 
 - `FAIL-BRK` with original pivot, maximum advance, days above pivot, failure
@@ -1055,6 +1198,31 @@ FAILED or INVALIDATED.
 ---
 
 # Phase 13 — Scoring, context, and lifecycle persistence
+
+## Review status — complete
+
+Reviewed against the Phase 13 migration, scoring, lifecycle, and exit criteria
+on 2026-09-05. The implementation is complete.
+
+- [x] Migration `011_create_pattern_tables.sql` defines versioned pattern
+  instances, bounded scores, geometry, lineage, active deduplication, and an
+  append-only event timeline with database-enforced update/delete rejection.
+- [x] Reusable bounded weighted scoring returns named contributions; context
+  measures market, sector, trend, relative strength, volume, and liquidity
+  independently from detector geometry.
+- [x] Setup scoring uses the configured `35/20/15/15/10/5` weighting and
+  maturity scores map across all configured display-band boundaries.
+- [x] Lifecycle matching reuses overlapping same-security/same-type instances
+  within pivot tolerance, so daily scans update instead of duplicating rows.
+- [x] Backward transitions are rejected, terminal states cannot be updated, and
+  optimistic state versions protect concurrent persistence.
+- [x] Meaningful state, pivot, score, maturity, and terminal changes are stored
+  atomically with reconstructable previous/new event values.
+- [x] Trigger and confirmation dates retain their actual effective dates,
+  including candidates first persisted in `CONFIRMED` state.
+- [x] Base, breakout-retest, EMA20-pullback, and SMA50-pullback expiry uses
+  configured trading-session limits.
+- [x] Focused Phase 12/13 tests and the complete backend suite pass: 123 tests.
 
 ## Migrations
 
@@ -1318,6 +1486,22 @@ state, measurements, and scores.
 - Six-plus million row backfill volume benchmark.
 - Full-universe daily runtime benchmark.
 - 320px/390px frontend width and keyboard accessibility checks.
+
+## Phase 18 implementation assets
+
+- `test_cross_phase_strategy.py` covers the reviewed Reliance NSE payload from
+  parsing through adjustment/features, correction recomputation, and the
+  swing/detector/lifecycle persistence boundary.
+- `fixtures/golden/pattern_scenarios.json` is the machine-validated V1 scenario
+  inventory and explanation contract.
+- `test_live_nse_contract.py` and `data_pipeline.cli verify-nse-contract` provide
+  the opt-in exchange contract gate without making deterministic CI depend on
+  NSE availability.
+- `benchmarks.phase18` supplies the bounded-memory six-million-row ingestion
+  benchmark; `operations.cli benchmark-scan` supplies the production detector
+  universe benchmark.
+- `src/doc/cross_phase_testing_strategy.md` defines execution, provenance,
+  responsive/accessibility gates, and failure interpretation.
 
 # 19. Phase dependencies and delivery gates
 

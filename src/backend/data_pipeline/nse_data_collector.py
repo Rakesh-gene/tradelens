@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime
+from time import perf_counter
 from typing import Protocol
 
 from data_pipeline.nse_api import NseApiClient
@@ -16,18 +17,32 @@ class EquityRepository(Protocol):
 class NseDataCollector:
     """Imports NSE's equity master list into the application database."""
 
-    def __init__(self, repository: EquityRepository, nse_client: NseApiClient | None = None) -> None:
+    def __init__(self, repository: EquityRepository, nse_client: NseApiClient | None = None, *, run_repository=None) -> None:
         self._repository = repository
         self._nse_client = nse_client or NseApiClient()
+        self._run_repository = run_repository
 
     def DownloadEquities(self) -> int:
         """Download, validate, and upsert NSE equity master records.
 
         The PascalCase name is intentionally retained for the scheduled-job API.
         """
-        csv_content = self._nse_client.download_equities_csv()
-        equities = self._parse_equities(csv_content)
-        return self._repository.upsert_equities(equities)
+        started = perf_counter(); run_id = None
+        if self._run_repository is not None:
+            from pattern_engine.enums import ImportJobType, ImportStatus
+            run_id = self._run_repository.create_import_run(ImportJobType.EQUITY_MASTER, "manual")
+            self._run_repository.update_import_run(run_id, ImportStatus.RUNNING)
+        try:
+            csv_content = self._nse_client.download_equities_csv()
+            equities = self._parse_equities(csv_content)
+            count = self._repository.upsert_equities(equities)
+        except Exception as exc:
+            if run_id:
+                self._run_repository.update_import_run(run_id, ImportStatus.FAILED, rows_rejected=1, error_summary=str(exc)[:500], duration_ms=round((perf_counter() - started) * 1000), source_metrics=getattr(self._nse_client, "metrics", {}))
+            raise
+        if run_id:
+            self._run_repository.update_import_run(run_id, ImportStatus.COMPLETED, rows_downloaded=len(equities), rows_inserted=count, duration_ms=round((perf_counter() - started) * 1000), source_metrics=getattr(self._nse_client, "metrics", {}))
+        return count
 
     def download_equities(self) -> int:
         """PEP-8 alias for :meth:`DownloadEquities`."""

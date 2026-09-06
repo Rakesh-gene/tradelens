@@ -1,11 +1,16 @@
 [engine]
 version = "v1"
 minimum_history_sessions = 250
+score_event_minimum_delta = 1.0
 
 [data]
 initial_history_years = 10
 daily_repair_window_sessions = 10
 minimum_price = 20.0
+
+[operations]
+daily_processing_window_minutes = 120
+default_benchmark_securities = 100
 
 [adjustments]
 methodology_version = "v1"
@@ -50,14 +55,23 @@ min_depth_pct = 0.0
 max_depth_pct = 15.0
 max_range_pct = 15.0
 ready_pivot_distance_pct = 3.0
+maximum_regression_move_pct = 5.0
+maximum_atr_compression_ratio = 0.85
+maximum_volume_compression_ratio = 0.85
+ready_quality_score = 70.0
 
 [base_52wh]
 min_duration_sessions = 20
-max_duration_sessions = 120
+max_duration_sessions = 80
 min_depth_pct = 0.0
 max_depth_pct = 35.0
-maximum_distance_to_52_week_high_pct = 15.0
-ready_pivot_distance_pct = 3.0
+maximum_distance_to_52_week_high_pct = 10.0
+ready_pivot_distance_pct = 5.0
+near_high_threshold_pct = 12.0
+minimum_persistence_ratio = 0.60
+ready_quality_score = 70.0
+strong_ready_distance_pct = 3.0
+strong_ready_quality_score = 85.0
 
 [breakout]
 minimum_resistance_tests = 2
@@ -67,6 +81,10 @@ breakout_buffer_pct = 0.5
 minimum_close_above_pivot_pct = 0.0
 minimum_volume_expansion_ratio = 1.2
 failure_window_sessions = 5
+strong_close_clv = 0.85
+strong_close_atr = 1.0
+ath_minimum_history_sessions = 252
+multi_year_tolerance_pct = 2.0
 
 [breakout_retest]
 min_sessions_after_breakout = 3
@@ -75,6 +93,13 @@ preferred_min_sessions = 5
 preferred_max_sessions = 20
 max_retest_depth_pct = 8.0
 reclaim_buffer_pct = 0.5
+minimum_advance_pct = 3.0
+minimum_advance_atr = 1.0
+retest_tolerance_natr_factor = 0.5
+minimum_retest_tolerance_pct = 1.0
+maximum_retest_tolerance_pct = 2.5
+preferred_volume_ratio = 0.85
+strong_volume_ratio = 0.65
 
 [ema20_pullback]
 min_depth_pct = 3.0
@@ -83,6 +108,14 @@ min_duration_sessions = 2
 max_duration_sessions = 10
 ema_touch_tolerance_pct = 2.0
 minimum_ema_slope_pct = 0.0
+touch_tolerance_natr_factor = 0.5
+minimum_touch_tolerance_pct = 0.75
+maximum_touch_tolerance_pct = 2.0
+minimum_prior_closes_above = 10
+prior_close_lookback_sessions = 15
+preferred_volume_ratio = 0.85
+strong_volume_ratio = 0.70
+preferred_clv = 0.60
 
 [sma50_pullback]
 min_depth_pct = 5.0
@@ -91,8 +124,18 @@ min_duration_sessions = 3
 max_duration_sessions = 20
 sma_touch_tolerance_pct = 2.0
 minimum_sma_slope_pct = 0.0
+touch_tolerance_natr_factor = 0.5
+minimum_touch_tolerance_pct = 1.0
+maximum_touch_tolerance_pct = 2.5
+prior_close_lookback_sessions = 40
+minimum_prior_closes_above_ratio = 0.70
+touch_count_lookback_sessions = 126
+touch_episode_separation_sessions = 10
+preferred_volume_ratio = 0.85
+preferred_clv = 0.60
 
 [trend]
+ma_conditions = ["close_above_ema20", "ema20_above_sma50", "sma50_above_sma100", "sma100_above_sma200", "ema20_rising", "sma50_rising", "sma200_nonnegative"]
 stage_2_minimum_score = 70.0
 minimum_higher_high_low_pairs = 2
 ma_slope_lookback_sessions = 20
@@ -118,9 +161,14 @@ minimum_expansion_ratio = 1.20
 
 [failure]
 breakout_failure_window_sessions = 5
+breakout_strong_failure_volume_ratio = 1.3
 base_support_break_pct = 2.0
 ema20_failure_close_below_pct = 2.0
+ema20_minimum_consecutive_closes = 2
+ema20_minimum_penetration_atr = 1.0
 sma50_failure_close_below_pct = 2.0
+sma50_minimum_consecutive_closes = 2
+sma50_minimum_penetration_atr = 1.0
 structural_failure_lookback_sessions = 60
 climax_volume_ratio = 2.0
 

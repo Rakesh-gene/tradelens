@@ -7,8 +7,14 @@ import json
 import time
 from typing import Any
 
+ACCESS_TOKEN_TTL_SECONDS = 12 * 60 * 60
 
-def issue_access_token(user: dict[str, object], secret: str, expires_in_seconds: int = 3600) -> str:
+
+def issue_access_token(
+    user: dict[str, object],
+    secret: str,
+    expires_in_seconds: int = ACCESS_TOKEN_TTL_SECONDS,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": str(user["id"]),

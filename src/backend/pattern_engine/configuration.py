@@ -17,6 +17,7 @@ REQUIRED_SECTIONS = frozenset(
     {
         "engine",
         "data",
+        "operations",
         "adjustments",
         "swings",
         "zones",

@@ -134,6 +134,46 @@ class HistoryBackfillServiceTestCase(unittest.TestCase):
         self.assertEqual(self.client.action_calls, [])
         self.assertEqual(result.securities[0].chunks, [])
 
+    def test_daily_run_downloads_only_missing_price_tail_and_recent_actions(self) -> None:
+        self.repository.date_ranges["INE000000001"] = (
+            date(2016, 9, 7), date(2026, 9, 4)
+        )
+        for job_type in (
+            ImportJobType.HISTORY_BACKFILL,
+            ImportJobType.CORPORATE_ACTION_BACKFILL,
+        ):
+            self.repository.checkpoints[(job_type, "INE000000001")] = {
+                "status": ImportStatus.COMPLETED.value,
+                "last_attempted_from_date": date(2016, 9, 7),
+                "last_attempted_to_date": date(2026, 9, 4),
+            }
+        self.service._today = lambda: date(2026, 9, 7)
+
+        result = self.service.run(BackfillRequest(
+            from_date=date(2016, 9, 7),
+            to_date=date(2026, 9, 7),
+            symbol="EXAMPLE",
+        ))
+
+        self.assertEqual(
+            [("EXAMPLE", date(2026, 9, 5), date(2026, 9, 7))],
+            self.client.history_calls,
+        )
+        self.assertEqual(
+            [("EXAMPLE", date(2026, 8, 15), date(2026, 9, 7))],
+            self.client.action_calls,
+        )
+        self.assertEqual(
+            date(2016, 9, 7),
+            self.repository.checkpoints[
+                (ImportJobType.CORPORATE_ACTION_BACKFILL, "INE000000001")
+            ]["last_attempted_from_date"],
+        )
+        self.assertEqual(
+            [(date(2026, 9, 5), date(2026, 9, 7))],
+            result.securities[0].chunks,
+        )
+
     def test_retry_failed_selects_only_failed_security_checkpoints(self) -> None:
         self.repository.checkpoints[(ImportJobType.HISTORY_BACKFILL, "INE000000003")] = {
             "status": ImportStatus.FAILED.value,

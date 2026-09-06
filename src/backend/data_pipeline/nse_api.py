@@ -7,6 +7,7 @@ import http.cookiejar
 import json
 import random
 import socket
+from threading import Lock
 import time
 from typing import Callable, Mapping
 from urllib.error import HTTPError, URLError
@@ -44,7 +45,7 @@ class NseApiClient:
     HOME_URL = "https://www.nseindia.com/"
     API_URL = "https://www.nseindia.com/api"
     EQUITIES_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
-    EQUITY_HISTORY_URL = "https://www.nseindia.com/NextApi/apiClient/GetQuoteApi"
+    EQUITY_HISTORY_URL = f"{API_URL}/NextApi/apiClient/GetQuoteApi"
     CORPORATE_ACTIONS_URL = f"{API_URL}/corporates-corporateActions"
     INDEX_HISTORY_URL = f"{API_URL}/historical/indicesHistory"
     EOD_REPORT_URL_TEMPLATE = (
@@ -88,6 +89,22 @@ class NseApiClient:
         self._random_value = random_value
         self._next_request_at = 0.0
         self._session_ready = False
+        self._request_slot_lock = Lock()
+        self._session_lock = Lock()
+        self._corporate_action_lock = Lock()
+        self._corporate_action_cache: dict[tuple[date, date], object] = {}
+        self._metrics = {
+            "requestAttempts": 0, "successfulRequests": 0,
+            "rateLimitedRequests": 0, "blockedRequests": 0,
+            "timeoutRequests": 0, "networkErrors": 0,
+            "corporateActionCacheHits": 0,
+        }
+
+    @property
+    def metrics(self) -> dict[str, int]:
+        """Return aggregate, secret-free source request counters for job metrics."""
+
+        return dict(self._metrics)
 
     def download_equities_csv(self) -> bytes:
         """Download the NSE equity master CSV after validating it is not an error page."""
@@ -122,17 +139,25 @@ class NseApiClient:
 
         normalized_symbol = self._normalize_symbol(symbol)
         records: list[NseCorporateActionRecord] = []
-        for chunk_from, chunk_to in self._date_chunks(from_date, to_date):
-            payload = self._request_json(
-                self.CORPORATE_ACTIONS_URL,
-                {
-                    "index": "equities",
-                    "from_date": self._format_date(chunk_from),
-                    "to_date": self._format_date(chunk_to),
-                },
-            )
+        for chunk_from, chunk_to in self._aligned_date_chunks(from_date, to_date):
+            key = (chunk_from, chunk_to)
+            with self._corporate_action_lock:
+                payload = self._corporate_action_cache.get(key)
+                if payload is None:
+                    payload = self._request_json(
+                        self.CORPORATE_ACTIONS_URL,
+                        {
+                            "index": "equities",
+                            "from_date": self._format_date(chunk_from),
+                            "to_date": self._format_date(chunk_to),
+                        },
+                    )
+                    self._corporate_action_cache[key] = payload
+                else:
+                    self._metrics["corporateActionCacheHits"] += 1
             records.extend(parse_corporate_actions_response(payload, normalized_symbol))
-        return self._deduplicate_actions(records)
+        requested = [record for record in records if from_date <= record.ex_date <= to_date]
+        return self._deduplicate_actions(requested)
 
     def fetch_index_history(
         self, index_name: str, from_date: date, to_date: date
@@ -195,11 +220,18 @@ class NseApiClient:
     def _request_bytes(self, url: str, accept: str) -> tuple[bytes, str | None]:
         last_error: NseRequestError | None = None
         for attempt in range(self._max_retries + 1):
+            self._metrics["requestAttempts"] += 1
             try:
-                return self._open_once(url, accept)
+                response = self._open_once(url, accept)
+                self._metrics["successfulRequests"] += 1
+                return response
             except Exception as error:  # noqa: BLE001 - normalize transport exceptions at this boundary
                 classified = self._classify_error(error)
-                if classified.status_code == 403 and not self._session_ready:
+                if classified.status_code == 429: self._metrics["rateLimitedRequests"] += 1
+                if classified.status_code == 403 or classified.category == "HTML_BLOCK_PAGE": self._metrics["blockedRequests"] += 1
+                if classified.category == "TIMEOUT": self._metrics["timeoutRequests"] += 1
+                if classified.category in {"NETWORK_ERROR", "CONNECTION_RESET"}: self._metrics["networkErrors"] += 1
+                if classified.status_code in {403, 404} and not self._session_ready:
                     self._ensure_session()
                     last_error = classified
                     continue
@@ -210,7 +242,11 @@ class NseApiClient:
         raise last_error or NseRequestError("UNKNOWN", "NSE request failed")
 
     def _open_once(self, url: str, accept: str) -> tuple[bytes, str | None]:
-        self._wait_for_request_slot()
+        # Only serialize reservation of a rate-limit slot. Holding this lock
+        # while waiting for the response lets one slow NSE call stall every
+        # equity worker and defeats bounded HTTP concurrency.
+        with self._request_slot_lock:
+            self._wait_for_request_slot()
         request = Request(url, headers=self._headers(accept))
         with self._opener.open(request, timeout=self._timeout_seconds) as response:
             status_code = getattr(response, "status", 200)
@@ -219,10 +255,11 @@ class NseApiClient:
             return response.read(), self._response_content_type(response)
 
     def _ensure_session(self) -> None:
-        if self._session_ready:
-            return
-        self._open_once(self.HOME_URL, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
-        self._session_ready = True
+        with self._session_lock:
+            if self._session_ready:
+                return
+            self._open_once(self.HOME_URL, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
+            self._session_ready = True
 
     def _wait_for_request_slot(self) -> None:
         now = self._monotonic()
@@ -293,7 +330,7 @@ class NseApiClient:
     @staticmethod
     def _is_retryable(error: NseRequestError) -> bool:
         return (
-            error.status_code in {403, 429}
+            error.status_code in {403, 404, 429}
             or error.status_code is not None and error.status_code >= 500
             or error.category in {"TIMEOUT", "CONNECTION_RESET", "NETWORK_ERROR"}
         )
@@ -307,6 +344,22 @@ class NseApiClient:
             chunk_to = min(chunk_from + timedelta(days=self._max_history_days - 1), to_date)
             chunks.append((chunk_from, chunk_to))
             chunk_from = chunk_to + timedelta(days=1)
+        return chunks
+
+    def _aligned_date_chunks(self, from_date: date, to_date: date) -> list[tuple[date, date]]:
+        """Return stable request windows so universe-wide responses can be reused."""
+        if from_date > to_date:
+            raise ValueError("from_date cannot be after to_date")
+        ordinal = from_date.toordinal()
+        bucket_start = ordinal - ((ordinal - 1) % self._max_history_days)
+        chunks = []
+        while bucket_start <= to_date.toordinal():
+            chunk_from = date.fromordinal(bucket_start)
+            chunk_to = min(
+                date.fromordinal(bucket_start + self._max_history_days - 1), to_date
+            )
+            chunks.append((chunk_from, chunk_to))
+            bucket_start += self._max_history_days
         return chunks
 
     @staticmethod

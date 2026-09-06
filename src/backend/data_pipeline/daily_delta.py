@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Mapping
+from time import perf_counter
 
 from data_pipeline.models import NseEquityHistoryRecord
 from data_pipeline.normalization import corporate_action_record, parse_eod_report, raw_bar_record
@@ -57,15 +58,18 @@ class DailyDeltaService:
         *,
         session_resolver: Callable[[date, Mapping[str, Mapping[str, object]]], tuple[date, dict[str, NseEquityHistoryRecord]]] | None = None,
         on_source_commit: Callable[[str, date, date], None] | None = None,
+        event_logger=None,
         today: Callable[[], date] = date.today,
     ) -> None:
         self._repository = repository
         self._nse_client = nse_client or NseApiClient()
         self._session_resolver = session_resolver
         self._on_source_commit = on_source_commit
+        self._event_logger = event_logger
         self._today = today
 
     def run(self, request: DailyDeltaRequest) -> DailyDeltaRunResult:
+        started = perf_counter()
         self._validate_request(request)
         securities = self._eligible_securities(request)
         security_map = {str(item["isin"]): item for item in securities}
@@ -87,6 +91,8 @@ class DailyDeltaService:
         self._repository.update_import_run(run_id, ImportStatus.RUNNING)
         completed = failed = downloaded = inserted = updated = rejected = 0
         for result in results:
+            security_started = perf_counter(); error_class = None
+            attempt = int((self._repository.get_import_checkpoint(ImportJobType.DAILY_DELTA, result.isin) or {}).get("retry_count") or 0) + 1
             try:
                 self._import_security(result, latest_session, bulk_bars, run_id)
                 completed += 1
@@ -94,10 +100,22 @@ class DailyDeltaService:
                 inserted += result.rows_inserted + result.actions_inserted
                 updated += result.rows_updated
             except Exception as error:  # one bad security must not stop the daily run
+                error_class = type(error).__name__
                 result.error = str(error).replace("\n", " ")[:500]
                 failed += 1
                 rejected += 1
                 self._record_failure(result, latest_session, run_id)
+            if self._event_logger:
+                self._event_logger.emit(
+                    "daily_security_completed" if not result.error else "daily_security_failed",
+                    level="INFO" if not result.error else "ERROR", run_id=run_id,
+                    job_type=ImportJobType.DAILY_DELTA.value, isin=result.isin, symbol=result.symbol,
+                    requested_from_date=result.from_date, requested_to_date=result.to_date,
+                    attempt=attempt,
+                    duration_ms=round((perf_counter() - security_started) * 1000),
+                    row_count=result.rows_downloaded, source_status="OK" if not result.error else "FAILED",
+                    error_class=error_class, details={"error": result.error} if result.error else {},
+                )
             self._repository.update_import_run(
                 run_id,
                 ImportStatus.RUNNING,
@@ -114,6 +132,8 @@ class DailyDeltaService:
             run_id, status, securities_completed=completed, securities_failed=failed,
             rows_downloaded=downloaded, rows_inserted=inserted, rows_updated=updated,
             rows_rejected=rejected, error_summary=summary,
+            duration_ms=round((perf_counter() - started) * 1000),
+            source_metrics=getattr(self._nse_client, "metrics", {}),
         )
         return DailyDeltaRunResult(run_id, status, latest_session, tuple(results))
 
@@ -145,7 +165,10 @@ class DailyDeltaService:
             result.symbol, result.from_date, latest_session
         )
         bars = sorted({bar.trading_date: bar for bar in bars}.values(), key=lambda bar: bar.trading_date)
-        raw_bars = [raw_bar_record(bar, result.isin, run_id) for bar in bars]
+        raw_bars = [
+            raw_bar_record(bar, result.isin, run_id, expected_symbol=result.symbol)
+            for bar in bars
+        ]
         result.rows_downloaded = len(bars)
         result.rows_inserted = sum(1 for bar in raw_bars if bar["trading_date"] not in existing)
         result.rows_updated = sum(
@@ -171,7 +194,12 @@ class DailyDeltaService:
             )
         }
         actions = self._nse_client.fetch_corporate_actions(result.symbol, action_start, latest_session)
-        mapped = [corporate_action_record(action, result.isin, run_id) for action in actions]
+        mapped = [
+            corporate_action_record(
+                action, result.isin, run_id, expected_symbol=result.symbol
+            )
+            for action in actions
+        ]
         result.actions_inserted = sum(
             1 for action in mapped if action["source_event_key"] not in existing_actions
         )

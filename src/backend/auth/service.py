@@ -56,6 +56,11 @@ class AuthService:
             raise ValueError("Invalid or expired access token")
         return {"id": user["id"], "email": user["email"], "is_admin": bool(user.get("is_admin", False))}
 
+    def renew_access_token(self, access_token: str) -> tuple[dict[str, object], str]:
+        """Validate the current session and issue a fresh sliding access token."""
+        user = self.current_user(access_token)
+        return user, issue_access_token(user, self._jwt_secret)
+
     @staticmethod
     def _hash_password(password: str) -> str:
         return hashlib.sha256(password.encode("utf-8")).hexdigest()

@@ -84,9 +84,20 @@ export default function LoginPage({ onAuthenticated }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(values),
             })
-            const payload = await response.json()
+            const responseBody = await response.text()
+            let payload = {}
+            if (responseBody) {
+              try {
+                payload = JSON.parse(responseBody)
+              } catch {
+                throw new Error('The sign-in service returned an invalid response. Please try again.')
+              }
+            }
             if (!response.ok) {
-              throw new Error(payload.error || 'Unable to sign in')
+              throw new Error(payload.error || 'The sign-in service is unavailable. Please try again.')
+            }
+            if (!payload.accessToken || !payload.user) {
+              throw new Error('The sign-in service returned an incomplete response. Please try again.')
             }
             onAuthenticated(payload.accessToken, payload.user)
           }}

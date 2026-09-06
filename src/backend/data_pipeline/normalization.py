@@ -40,6 +40,7 @@ DATE_FORMATS = (
     "%d %b %Y",
 )
 NULL_VALUES = frozenset({"", "-", "na", "n/a", "null", "none", "nan"})
+ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{10}$")
 RATIO_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)")
 CASH_PATTERN = re.compile(r"(?:rs\.?|inr|₹)\s*(\d+(?:,\d{3})*(?:\.\d+)?)", re.IGNORECASE)
 
@@ -53,7 +54,9 @@ def parse_equity_history_response(
     for raw_record in _extract_records(payload, expected_symbol):
         fields = _normalized_fields(raw_record)
         symbol = _required_text(fields, ("ch_symbol", "symbol"), expected_symbol, "symbol")
-        trading_date = _required_date(fields, ("ch_timestamp", "timestamp", "trading_date", "date"), symbol)
+        trading_date = _required_date(
+            fields, ("ch_timestamp", "mtimestamp", "timestamp", "trading_date", "date"), symbol
+        )
         open_price = _required_positive_decimal(fields, ("ch_opening_price", "open", "open_price"), symbol, trading_date)
         high_price = _required_positive_decimal(fields, ("ch_trade_high_price", "high", "high_price"), symbol, trading_date)
         low_price = _required_positive_decimal(fields, ("ch_trade_low_price", "low", "low_price"), symbol, trading_date)
@@ -228,17 +231,23 @@ def parse_eod_report(
 
 
 def raw_bar_record(
-    record: NseEquityHistoryRecord, isin: str, import_run_id: str | None = None
+    record: NseEquityHistoryRecord,
+    isin: str,
+    import_run_id: str | None = None,
+    *,
+    expected_symbol: str | None = None,
 ) -> dict[str, object]:
     """Map a validated DTO to Phase 1's repository record without NSE field names."""
 
     normalized_isin = isin.strip().upper()
     if not normalized_isin:
         raise NseDataValidationError(record.symbol, "isin", "is required")
-    if record.source_isin and record.source_isin.strip().upper() != normalized_isin:
-        raise NseDataValidationError(record.symbol, "isin", "does not match the stable security ISIN", record.trading_date)
+    source_isin = _validate_source_security_identity(
+        record.symbol, record.source_isin, normalized_isin, expected_symbol, record.trading_date
+    )
     return {
         "isin": normalized_isin,
+        "source_isin": source_isin,
         "trading_date": record.trading_date,
         "open_price": record.open_price,
         "high_price": record.high_price,
@@ -256,18 +265,24 @@ def raw_bar_record(
 
 
 def corporate_action_record(
-    record: NseCorporateActionRecord, isin: str, import_run_id: str | None = None
+    record: NseCorporateActionRecord,
+    isin: str,
+    import_run_id: str | None = None,
+    *,
+    expected_symbol: str | None = None,
 ) -> dict[str, object]:
     """Map a validated corporate-action DTO to Phase 1 repository values."""
 
     normalized_isin = isin.strip().upper()
     if not normalized_isin:
         raise NseDataValidationError(record.symbol, "isin", "is required")
-    if record.source_isin and record.source_isin.strip().upper() != normalized_isin:
-        raise NseDataValidationError(record.symbol, "isin", "does not match the stable security ISIN", record.ex_date)
+    source_isin = _validate_source_security_identity(
+        record.symbol, record.source_isin, normalized_isin, expected_symbol, record.ex_date
+    )
     return {
         "source_event_key": record.source_event_key,
         "isin": normalized_isin,
+        "source_isin": source_isin,
         "symbol": record.symbol,
         "action_type": record.action_type,
         "ex_date": record.ex_date,
@@ -282,6 +297,41 @@ def corporate_action_record(
         "source_checksum": record.source_checksum,
         "import_run_id": import_run_id,
     }
+
+
+def _validate_source_security_identity(
+    source_symbol: str,
+    source_isin: str | None,
+    stable_isin: str,
+    expected_symbol: str | None,
+    effective_date: date,
+) -> str | None:
+    """Allow a historical ISIN version only for the same symbol and issuer."""
+
+    if not source_isin:
+        return None
+    normalized_source_isin = source_isin.strip().upper()
+    if normalized_source_isin == stable_isin:
+        return normalized_source_isin
+
+    same_symbol = bool(expected_symbol) and (
+        _normalize_symbol(source_symbol) == _normalize_symbol(expected_symbol or "")
+    )
+    # The first seven ISIN characters identify the Indian issuer. A corporate
+    # action can change the security code and checksum without changing issuer.
+    same_issuer = (
+        bool(ISIN_PATTERN.fullmatch(normalized_source_isin))
+        and bool(ISIN_PATTERN.fullmatch(stable_isin))
+        and normalized_source_isin[:7] == stable_isin[:7]
+    )
+    if same_symbol and same_issuer:
+        return normalized_source_isin
+    raise NseDataValidationError(
+        source_symbol,
+        "isin",
+        "does not match the stable security ISIN or a validated historical version",
+        effective_date,
+    )
 
 
 def _extract_records(payload: object, symbol: str) -> Sequence[Mapping[str, object]]:
@@ -301,7 +351,13 @@ def _extract_records(payload: object, symbol: str) -> Sequence[Mapping[str, obje
 
 
 def _normalized_fields(record: Mapping[str, object]) -> dict[str, object]:
-    return {str(key).strip().lower(): value for key, value in record.items()}
+    fields: dict[str, object] = {}
+    for key, value in record.items():
+        normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key).strip())
+        normalized = re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+        fields[normalized] = value
+        fields.setdefault(normalized.replace("_", ""), value)
+    return fields
 
 
 def _required_text(

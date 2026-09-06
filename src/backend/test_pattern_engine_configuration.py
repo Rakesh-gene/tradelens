@@ -50,6 +50,7 @@ class PatternEngineConfigurationTestCase(unittest.TestCase):
         self.assertEqual(configuration.version, "v1")
         self.assertEqual(configuration.section("setup_weights")["pattern_quality"], 35.0)
         self.assertEqual(configuration.section("adjustments")["cash_dividend_policy"], "ignore")
+        self.assertEqual(configuration.section("operations")["daily_processing_window_minutes"], 120)
         with self.assertRaises(TypeError):
             configuration.section("setup_weights")["pattern_quality"] = 0.0  # type: ignore[index]
 

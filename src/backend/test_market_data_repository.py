@@ -94,6 +94,40 @@ class MarketDataMigrationTestCase(unittest.TestCase):
                 "ADD COLUMN IF NOT EXISTS last_test_date DATE",
                 "ADD COLUMN IF NOT EXISTS confirmation_date DATE",
             ],
+            "011_create_pattern_tables.sql": [
+                "CREATE TABLE IF NOT EXISTS pattern_instances",
+                "CREATE TABLE IF NOT EXISTS pattern_events",
+                "pattern_instances_active_dedup_idx",
+                "source_pattern_id UUID REFERENCES pattern_instances",
+                "CREATE TRIGGER pattern_events_immutable",
+            ],
+            "012_create_pattern_scan_tracking.sql": [
+                "ADD COLUMN IF NOT EXISTS metrics JSONB",
+                "CREATE TABLE IF NOT EXISTS pattern_scan_failures",
+                "pattern_scan_failures_run_idx",
+            ],
+            "013_create_backtest_tables.sql": [
+                "CREATE TABLE IF NOT EXISTS backtest_runs",
+                "CREATE TABLE IF NOT EXISTS backtest_entries",
+                "CREATE TABLE IF NOT EXISTS backtest_outcomes",
+                "point_in_time_policy JSONB NOT NULL",
+                "UNIQUE (backtest_run_id, fingerprint_key)",
+            ],
+            "014_extend_backtest_entry_scores.sql": [
+                "ADD COLUMN IF NOT EXISTS quality_score NUMERIC",
+                "ADD COLUMN IF NOT EXISTS maturity_score NUMERIC",
+                "ADD COLUMN IF NOT EXISTS context_score NUMERIC",
+            ],
+            "015_create_operational_monitoring.sql": [
+                "ADD COLUMN IF NOT EXISTS duration_ms BIGINT",
+                "CREATE TABLE IF NOT EXISTS operational_events",
+                "CREATE TABLE IF NOT EXISTS data_quality_anomalies",
+                "ADD COLUMN IF NOT EXISTS last_completed_session DATE",
+            ],
+            "017_record_historical_source_isin.sql": [
+                "ADD COLUMN IF NOT EXISTS source_isin TEXT",
+                "nse_daily_bars_raw_source_isin_idx",
+            ],
         }
 
         for filename, required_fragments in expected.items():
@@ -131,8 +165,44 @@ class PostgresMarketDataRepositoryTestCase(unittest.TestCase):
         self.assertIn("ON CONFLICT (isin, trading_date) DO UPDATE", statement)
         self.assertIn("raw_revision = nse_daily_bars_raw.raw_revision + 1", statement)
         self.assertEqual(parameters[0]["isin"], "INE000000001")
+        self.assertIsNone(parameters[0]["source_isin"])
         self.assertIsNone(parameters[0]["deliverable_quantity"])
         self.assertEqual(self.connection.commit_count, 1)
+
+    def test_pattern_scan_metrics_and_failures_are_parameterized(self) -> None:
+        self.repository.update_pattern_scan_metrics("run-1", {"patternsCreated": 2})
+        self.repository.record_pattern_scan_failure({
+            "run_id": "run-1", "isin": "INE000000001",
+            "as_of_date": date(2026, 9, 5), "stage": "bases",
+            "error_type": "ValueError", "error_message": "malformed",
+        })
+
+        metrics_statement, metrics_parameters = self.cursor.executed[0]
+        failure_statement, failure_parameters = self.cursor.executed[1]
+        self.assertIn("SET metrics = %s::jsonb", metrics_statement)
+        self.assertEqual(('{"patternsCreated": 2}', "run-1"), metrics_parameters)
+        self.assertIn("INSERT INTO pattern_scan_failures", failure_statement)
+        self.assertEqual("run-1", failure_parameters[1])
+        self.assertEqual("INE000000001", failure_parameters[2])
+
+    def test_import_run_persists_duration_source_and_stage_metrics(self) -> None:
+        self.repository.update_import_run(
+            "run-1", ImportStatus.COMPLETED, duration_ms=1250,
+            source_metrics={"successfulRequests": 4},
+            stage_metrics={"features": 300},
+        )
+        statement, parameters = self.cursor.executed[0]
+        self.assertIn("duration_ms = COALESCE", statement)
+        self.assertEqual(1250, parameters["duration_ms"])
+        self.assertEqual('{"successfulRequests": 4}', parameters["source_metrics"])
+        self.assertEqual('{"features": 300}', parameters["stage_metrics"])
+
+    def test_import_run_types_nullable_finished_at_for_postgres(self) -> None:
+        self.repository.update_import_run("run-1", ImportStatus.RUNNING)
+
+        statement, parameters = self.cursor.executed[0]
+        self.assertIn("%(finished_at)s::timestamptz IS NOT NULL", statement)
+        self.assertIsNone(parameters["finished_at"])
 
     def test_swing_and_zone_upserts_are_versioned_and_zone_sources_are_json(self) -> None:
         self.repository.upsert_swing_points([{
@@ -284,9 +354,23 @@ class PostgresMarketDataRepositoryTestCase(unittest.TestCase):
         )
 
         statement, parameters = self.cursor.executed[0]
-        self.assertIn("imported_at <= %s", statement)
+        self.assertIn("%s::timestamptz IS NULL", statement)
+        self.assertIn("imported_at <= %s::timestamptz", statement)
         self.assertEqual(parameters[0:3], ("INE000000001", date(2026, 1, 1), date(2026, 12, 31)))
         self.assertEqual(len(actions), 1)
+
+    def test_loading_corporate_actions_types_a_missing_point_in_time_filter(self) -> None:
+        self.cursor = RecordingCursor(rows=[], columns=[])
+        self.connection = RecordingConnection(self.cursor)
+        self.repository._connect = lambda: self.connection
+
+        self.repository.load_corporate_actions(
+            "INE000000001", date(2026, 1, 1), date(2026, 12, 31)
+        )
+
+        statement, parameters = self.cursor.executed[0]
+        self.assertIn("%s::timestamptz IS NULL", statement)
+        self.assertIsNone(parameters[3])
 
 
 if __name__ == "__main__":
