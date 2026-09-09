@@ -153,6 +153,9 @@ class ApiTestCase(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/api/patterns/not-a-real-pattern/chart")
         self.assertEqual(context.exception.code, 401)
+        with self.assertRaises(HTTPError) as context:
+            urlopen(f"{self.base_url}/api/securities/search?q=reliance")
+        self.assertEqual(context.exception.code, 401)
         request = Request(
             f"{self.base_url}/api/research/runs", method="POST",
             data=b"{}", headers={"Content-Type": "application/json"},
@@ -264,6 +267,14 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual("RELIANCE", payload["security"]["symbol"])
         self.assertEqual("2024-01-05", payload["dataAsOf"])
         self.assertEqual("phase18-features-v1", payload["lineage"]["featureVersion"])
+
+        search = Request(
+            f"{self.base_url}/api/securities/search?q=reliance",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(search) as response:
+            matches = json.load(response)["items"]
+        self.assertEqual("INE002A01018", matches[0]["isin"])
 
     def test_authenticated_research_run_and_results_contract(self) -> None:
         self.repository.create_user(

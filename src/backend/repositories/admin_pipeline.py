@@ -78,14 +78,15 @@ class PostgresAdminPipelineRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """INSERT INTO admin_pipeline_runs (
-                           id, requested_by, requested_from_date, requested_to_date,
+                       id, requested_by, requested_from_date, requested_to_date,
                            versions, force_refresh, run_scope, batch_size, status,
-                           securities_total
-                       ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)""",
+                           securities_total, trigger_source, scheduled_for
+                       ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)""",
                     (run_id, values["requested_by"], values["requested_from_date"],
                      values["requested_to_date"], json.dumps(serialize_value(values["versions"]), sort_keys=True),
                      values["force_refresh"], values.get("run_scope", "SELECTION"),
-                     values.get("batch_size", 25), values["status"], len(securities)),
+                     values.get("batch_size", 25), values["status"], len(securities),
+                     values.get("trigger_source", "MANUAL"), values.get("scheduled_for")),
                 )
                 cursor.executemany(
                     """INSERT INTO admin_pipeline_run_items
@@ -95,6 +96,48 @@ class PostgresAdminPipelineRepository:
                 )
             connection.commit()
         return run_id
+
+    def scheduled_pipeline_run_exists(self, scheduled_for):
+        return self.get_scheduled_pipeline_run(scheduled_for) is not None
+
+    def get_scheduled_pipeline_run(self, scheduled_for):
+        return self._fetch_one(
+            """SELECT id, status, resume_count FROM admin_pipeline_runs
+               WHERE trigger_source = 'SCHEDULED' AND scheduled_for = %s
+               ORDER BY created_at DESC LIMIT 1""",
+            (scheduled_for,),
+        )
+
+    def active_pipeline_run_exists(self):
+        return self._fetch_one(
+            """SELECT id FROM admin_pipeline_runs
+               WHERE status IN ('PENDING', 'RUNNING', 'PAUSED') LIMIT 1""",
+            (),
+        ) is not None
+
+    def fail_interrupted_pipeline_runs(self):
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE admin_pipeline_run_items item
+                       SET status = 'FAILED', current_stage = 'INTERRUPTED',
+                           error_message = COALESCE(item.error_message, 'Backend stopped before this equity completed'),
+                           finished_at = COALESCE(item.finished_at, NOW()), updated_at = NOW()
+                       FROM admin_pipeline_runs run
+                       WHERE item.run_id = run.id
+                         AND run.status IN ('PENDING', 'RUNNING')
+                         AND item.status IN ('PENDING', 'RUNNING')"""
+                )
+                cursor.execute(
+                    """UPDATE admin_pipeline_runs
+                       SET status = 'FAILED', finished_at = NOW(),
+                           error_summary = COALESCE(error_summary, 'Backend stopped before the pipeline completed')
+                       WHERE status IN ('PENDING', 'RUNNING')
+                       RETURNING id"""
+                )
+                interrupted = len(cursor.fetchall())
+            connection.commit()
+        return interrupted
 
     def update_pipeline_run(self, run_id, status, **values):
         self._execute(

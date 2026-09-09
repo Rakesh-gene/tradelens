@@ -1,15 +1,20 @@
-import React from 'react'
-import { apiGet } from '../apiClient.js'
+import React, { useState } from 'react'
+import { getSecurityChart, getSecurityFingerprint } from '../api/securityApi.js'
 import useApiResource from '../useApiResource.js'
-import { formatMarketDate, formatPrice } from '../formatters.js'
+import { formatPrice } from '../utils/formatters.js'
 import {
   MeasurementGrid,
   PageIntro,
-  ResourceState,
   Score,
   SetupCard,
   StateBadge,
 } from '../components/PatternUi.jsx'
+import PatternCandlestickChart from '../components/PatternCandlestickChart.jsx'
+import PatternTimeline from '../components/PatternTimeline.jsx'
+import { ResourceState } from '../components/ResourceStates.jsx'
+import useDocumentTitle from '../hooks/useDocumentTitle.js'
+import NavigationLink from '../components/NavigationLink.jsx'
+import { buildPatternPath } from '../routing/routes.js'
 
 function SupportingEvidence({ title, items }) {
   return <article className="evidence-card">
@@ -21,14 +26,22 @@ function SupportingEvidence({ title, items }) {
 }
 
 export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
+  useDocumentTitle('Security fingerprint')
+  const [chartRange, setChartRange] = useState('6m')
   const resource = useApiResource(
-    isin,
-    (signal) => apiGet(`/api/securities/${encodeURIComponent(isin)}/fingerprint`, { signal, onUnauthorized }),
+    `${isin}:${chartRange}`,
+    async (signal) => {
+      const [fingerprint, chart] = await Promise.all([
+        getSecurityFingerprint(isin, { signal, onUnauthorized }),
+        getSecurityChart(isin, { range: chartRange }, { signal, onUnauthorized }),
+      ])
+      return { fingerprint, chart }
+    },
   )
 
   return <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
     {resource.data && (() => {
-      const fingerprint = resource.data
+      const { fingerprint, chart } = resource.data
       const primary = fingerprint.primarySetup
       return <>
         <PageIntro
@@ -37,6 +50,8 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
           description={`${fingerprint.security.name || 'NSE security'}${fingerprint.security.sectorName ? ` - ${fingerprint.security.sectorName}` : ''}`}
           date={fingerprint.dataAsOf}
         />
+
+        <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} evidence={chart.evidence} corporateActions={chart.corporateActions} range={chartRange} onRangeChange={setChartRange} /></section>
 
         <section className="detail-grid">
           <article className="evidence-card">
@@ -65,7 +80,7 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
             <div><span>Invalidation</span><strong>{formatPrice(primary.invalidationPrice)}</strong></div>
           </div>
           <div className="tag-list">{primary.supportingPatterns.map((pattern) => <span key={pattern}>{pattern}</span>)}</div>
-          <button type="button" className="text-button" onClick={() => onNavigate(`/patterns/${primary.patternInstanceId}`)}>Inspect full evidence -&gt;</button>
+          <NavigationLink className="text-button" to={buildPatternPath(primary.patternInstanceId)} onNavigate={onNavigate}>Inspect full evidence →</NavigationLink>
         </section>}
 
         <section className="detail-grid">
@@ -87,9 +102,7 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
 
         <section className="evidence-card">
           <h2>Recent lifecycle events</h2>
-          {fingerprint.recentEvents.length
-            ? <ol className="timeline">{fingerprint.recentEvents.map((event) => <li key={event.eventId}><span>{formatMarketDate(event.effectiveDate)}</span><strong>{event.eventType}</strong><p>{event.previousState || 'Created'} to {event.newState}</p></li>)}</ol>
-            : <p className="muted-copy">No lifecycle events recorded.</p>}
+          <PatternTimeline events={fingerprint.recentEvents} />
         </section>
 
         <section className="lineage" aria-label="Data lineage">

@@ -7,7 +7,7 @@ import http.cookiejar
 import json
 import random
 import socket
-from threading import Lock
+from threading import Lock, local
 import time
 from typing import Callable, Mapping
 from urllib.error import HTTPError, URLError
@@ -67,6 +67,9 @@ class NseApiClient:
         max_requests_per_second: float = 2.0,
         max_history_days: int = 100,
         opener=None,
+        opener_factory: Callable[[], object] | None = None,
+        circuit_breaker_threshold: int = 6,
+        circuit_breaker_cooldown_seconds: float = 30,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         random_value: Callable[[], float] = random.random,
@@ -79,18 +82,31 @@ class NseApiClient:
             raise ValueError("max_requests_per_second must be positive")
         if max_history_days <= 0:
             raise ValueError("max_history_days must be positive")
+        if opener is not None and opener_factory is not None:
+            raise ValueError("opener and opener_factory cannot both be supplied")
+        if circuit_breaker_threshold <= 0:
+            raise ValueError("circuit_breaker_threshold must be positive")
+        if circuit_breaker_cooldown_seconds < 0:
+            raise ValueError("circuit_breaker_cooldown_seconds cannot be negative")
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._request_interval_seconds = 1 / max_requests_per_second
         self._max_history_days = max_history_days
-        self._opener = opener or build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self._injected_opener = opener
+        self._opener_factory = opener_factory or self._build_opener
+        self._thread_session = local()
         self._monotonic = monotonic
         self._sleeper = sleeper
         self._random_value = random_value
         self._next_request_at = 0.0
-        self._session_ready = False
         self._request_slot_lock = Lock()
         self._session_lock = Lock()
+        self._circuit_lock = Lock()
+        self._metrics_lock = Lock()
+        self._circuit_breaker_threshold = circuit_breaker_threshold
+        self._circuit_breaker_cooldown_seconds = circuit_breaker_cooldown_seconds
+        self._consecutive_transport_failures = 0
+        self._circuit_open_until = 0.0
         self._corporate_action_lock = Lock()
         self._corporate_action_cache: dict[tuple[date, date], object] = {}
         self._metrics = {
@@ -98,13 +114,15 @@ class NseApiClient:
             "rateLimitedRequests": 0, "blockedRequests": 0,
             "timeoutRequests": 0, "networkErrors": 0,
             "corporateActionCacheHits": 0,
+            "sessionResets": 0, "circuitBreakerTrips": 0,
         }
 
     @property
     def metrics(self) -> dict[str, int]:
         """Return aggregate, secret-free source request counters for job metrics."""
 
-        return dict(self._metrics)
+        with self._metrics_lock:
+            return dict(self._metrics)
 
     def download_equities_csv(self) -> bytes:
         """Download the NSE equity master CSV after validating it is not an error page."""
@@ -154,7 +172,7 @@ class NseApiClient:
                     )
                     self._corporate_action_cache[key] = payload
                 else:
-                    self._metrics["corporateActionCacheHits"] += 1
+                    self._increment_metric("corporateActionCacheHits")
             records.extend(parse_corporate_actions_response(payload, normalized_symbol))
         requested = [record for record in records if from_date <= record.ex_date <= to_date]
         return self._deduplicate_actions(requested)
@@ -220,18 +238,22 @@ class NseApiClient:
     def _request_bytes(self, url: str, accept: str) -> tuple[bytes, str | None]:
         last_error: NseRequestError | None = None
         for attempt in range(self._max_retries + 1):
-            self._metrics["requestAttempts"] += 1
+            self._increment_metric("requestAttempts")
             try:
                 response = self._open_once(url, accept)
-                self._metrics["successfulRequests"] += 1
+                self._record_transport_success()
+                self._increment_metric("successfulRequests")
                 return response
             except Exception as error:  # noqa: BLE001 - normalize transport exceptions at this boundary
                 classified = self._classify_error(error)
-                if classified.status_code == 429: self._metrics["rateLimitedRequests"] += 1
-                if classified.status_code == 403 or classified.category == "HTML_BLOCK_PAGE": self._metrics["blockedRequests"] += 1
-                if classified.category == "TIMEOUT": self._metrics["timeoutRequests"] += 1
-                if classified.category in {"NETWORK_ERROR", "CONNECTION_RESET"}: self._metrics["networkErrors"] += 1
-                if classified.status_code in {403, 404} and not self._session_ready:
+                if classified.status_code == 429: self._increment_metric("rateLimitedRequests")
+                if classified.status_code == 403 or classified.category == "HTML_BLOCK_PAGE": self._increment_metric("blockedRequests")
+                if classified.category == "TIMEOUT": self._increment_metric("timeoutRequests")
+                if classified.category in {"NETWORK_ERROR", "CONNECTION_RESET"}: self._increment_metric("networkErrors")
+                if self._is_transport_failure(classified):
+                    self._record_transport_failure()
+                    self._reset_thread_session()
+                if classified.status_code in {403, 404} and not self._session_is_ready():
                     self._ensure_session()
                     last_error = classified
                     continue
@@ -242,13 +264,14 @@ class NseApiClient:
         raise last_error or NseRequestError("UNKNOWN", "NSE request failed")
 
     def _open_once(self, url: str, accept: str) -> tuple[bytes, str | None]:
+        self._wait_for_circuit()
         # Only serialize reservation of a rate-limit slot. Holding this lock
         # while waiting for the response lets one slow NSE call stall every
         # equity worker and defeats bounded HTTP concurrency.
         with self._request_slot_lock:
             self._wait_for_request_slot()
         request = Request(url, headers=self._headers(accept))
-        with self._opener.open(request, timeout=self._timeout_seconds) as response:
+        with self._opener_for_thread().open(request, timeout=self._timeout_seconds) as response:
             status_code = getattr(response, "status", 200)
             if status_code >= 400:
                 raise NseRequestError("HTTP_ERROR", f"NSE returned HTTP {status_code}", status_code=status_code)
@@ -256,10 +279,63 @@ class NseApiClient:
 
     def _ensure_session(self) -> None:
         with self._session_lock:
-            if self._session_ready:
+            if self._session_is_ready():
                 return
             self._open_once(self.HOME_URL, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
-            self._session_ready = True
+            self._thread_session.session_ready = True
+
+    @staticmethod
+    def _build_opener():
+        return build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def _opener_for_thread(self):
+        if self._injected_opener is not None:
+            return self._injected_opener
+        opener = getattr(self._thread_session, "opener", None)
+        if opener is None:
+            opener = self._opener_factory()
+            self._thread_session.opener = opener
+            self._thread_session.session_ready = False
+        return opener
+
+    def _session_is_ready(self) -> bool:
+        return bool(getattr(self._thread_session, "session_ready", False))
+
+    def _reset_thread_session(self) -> None:
+        # urllib openers own their CookieJar. Replacing the opener prevents a
+        # stale or silently throttled NSE session from poisoning later work on
+        # the same executor thread.
+        if self._injected_opener is None:
+            self._thread_session.opener = None
+        self._thread_session.session_ready = False
+        self._increment_metric("sessionResets")
+
+    def _wait_for_circuit(self) -> None:
+        with self._circuit_lock:
+            delay = max(0.0, self._circuit_open_until - self._monotonic())
+        if delay:
+            self._sleeper(delay)
+
+    def _record_transport_failure(self) -> None:
+        with self._circuit_lock:
+            self._consecutive_transport_failures += 1
+            if self._consecutive_transport_failures < self._circuit_breaker_threshold:
+                return
+            self._consecutive_transport_failures = 0
+            self._circuit_open_until = max(
+                self._circuit_open_until,
+                self._monotonic() + self._circuit_breaker_cooldown_seconds,
+            )
+        self._increment_metric("circuitBreakerTrips")
+
+    def _record_transport_success(self) -> None:
+        with self._circuit_lock:
+            self._consecutive_transport_failures = 0
+            self._circuit_open_until = 0.0
+
+    def _increment_metric(self, name: str) -> None:
+        with self._metrics_lock:
+            self._metrics[name] += 1
 
     def _wait_for_request_slot(self) -> None:
         now = self._monotonic()
@@ -334,6 +410,10 @@ class NseApiClient:
             or error.status_code is not None and error.status_code >= 500
             or error.category in {"TIMEOUT", "CONNECTION_RESET", "NETWORK_ERROR"}
         )
+
+    @staticmethod
+    def _is_transport_failure(error: NseRequestError) -> bool:
+        return error.category in {"TIMEOUT", "CONNECTION_RESET", "NETWORK_ERROR"}
 
     def _date_chunks(self, from_date: date, to_date: date) -> list[tuple[date, date]]:
         if from_date > to_date:

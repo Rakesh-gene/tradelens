@@ -113,13 +113,14 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_pattern_path(path):
-        if path in {"/api/overview", "/api/setups"}:
+        if path in {"/api/overview", "/api/setups", "/api/securities/search"}:
             return True
         parts = path.strip("/").split("/")
         return (
             len(parts) == 3 and parts[:2] == ["api", "patterns"]
             or len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"events", "chart"}
             or len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "fingerprint"
+            or len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "chart"
             or len(parts) == 4 and parts[:3] == ["api", "research", "runs"]
             or len(parts) == 5 and parts[:3] == ["api", "research", "runs"] and parts[4] == "results"
         )
@@ -129,6 +130,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self.pattern_service.overview(query)
         if path == "/api/setups":
             return self.pattern_service.setups(query)
+        if path == "/api/securities/search":
+            return self.pattern_service.search_securities(query)
         parts = path.strip("/").split("/")
         if len(parts) == 3 and parts[:2] == ["api", "patterns"]:
             return self.pattern_service.pattern(parts[2])
@@ -138,6 +141,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self.pattern_service.chart(parts[2], query)
         if len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "fingerprint":
             return self.pattern_service.fingerprint(parts[2], query)
+        if len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "chart":
+            return self.pattern_service.security_chart(parts[2], query)
         if len(parts) == 4 and parts[:3] == ["api", "research", "runs"]:
             return self.research_service.get_run(parts[3])
         if len(parts) == 5 and parts[:3] == ["api", "research", "runs"] and parts[4] == "results":

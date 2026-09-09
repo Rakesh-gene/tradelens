@@ -179,9 +179,12 @@
   --layout-overview-copy-max: 48rem;
   --layout-hero-measure: 12ch;
   --layout-mobile-copy-max: 34rem;
+  --layout-filter-drawer-max: 28rem;
   --breakpoint-tablet: 980px;
   --breakpoint-mobile: 640px;
   --z-index-content: 1;
+  --z-index-dropdown: 10;
+  --z-index-modal: 20;
 
   /* Interaction and accessibility tokens. */
   --duration-fast: 160ms;

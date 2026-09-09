@@ -1,0 +1,80 @@
+{
+  "error": {
+    "error": {
+      "code": "INVALID_FILTER",
+      "message": "The state filter is not supported.",
+      "details": { "field": "state" },
+      "requestId": "req_fixture"
+    }
+  },
+  "freshness": {
+    "dataAsOf": "2026-09-04",
+    "generatedAt": "2026-09-04T13:15:00Z",
+    "engineVersion": "1.0.0",
+    "configurationVersion": "2026-09-01",
+    "isStale": false
+  },
+  "setupSummary": {
+    "patternInstanceId": "2a9ca55f-3d2d-4b25-b683-36979029fb97",
+    "security": { "isin": "INE002A01018", "symbol": "RELIANCE", "name": "Reliance Industries Limited" },
+    "patternClass": "BASE",
+    "patternType": "BASE-VCP",
+    "variant": "VCP-3C",
+    "state": "READY",
+    "setupScore": 89.0,
+    "qualityScore": 92.0,
+    "maturityScore": 88.0,
+    "pivotPrice": 1500.0,
+    "distanceToPivotPct": -1.7
+  },
+  "patternDetail": {
+    "pattern": {
+      "patternInstanceId": "2a9ca55f-3d2d-4b25-b683-36979029fb97",
+      "security": { "isin": "INE002A01018", "symbol": "RELIANCE", "name": "Reliance Industries Limited" },
+      "patternClass": "BASE",
+      "patternType": "BASE-VCP",
+      "variant": "VCP-3C",
+      "state": "READY",
+      "measurements": {},
+      "scoreComponents": {},
+      "supportingPatterns": [],
+      "lineage": { "engineVersion": "1.0.0", "configurationVersion": "2026-09-01", "adjustmentVersion": "1" }
+    }
+  },
+  "event": {
+    "eventId": "97def59e-e5e8-47cb-80b1-b1fe291a5c08",
+    "eventType": "STATE_CHANGED",
+    "effectiveDate": "2026-09-04",
+    "recordedAt": "2026-09-04T13:15:00Z",
+    "previousState": "MATURE",
+    "newState": "READY",
+    "changes": {}
+  },
+  "fingerprint": {
+    "security": { "isin": "INE002A01018", "symbol": "RELIANCE" },
+    "dataAsOf": "2026-09-04",
+    "trend": {},
+    "primarySetup": null,
+    "compression": [],
+    "momentum": [],
+    "relativeStrength": {},
+    "volume": {},
+    "location": {},
+    "context": {},
+    "scores": {},
+    "activePatterns": [],
+    "recentEvents": [],
+    "lineage": {}
+  },
+  "chart": {
+    "security": { "isin": "INE002A01018", "symbol": "RELIANCE" },
+    "from": "2026-01-01",
+    "to": "2026-09-04",
+    "adjusted": true,
+    "priceScale": "linear",
+    "bars": [{ "date": "2026-09-04", "open": 1490.0, "high": 1510.0, "low": 1482.0, "close": 1501.0, "volume": 1234567, "ema20": 1488.0, "sma50": 1440.0, "sma200": 1310.0 }],
+    "levels": [],
+    "events": [],
+    "corporateActions": [{ "sourceEventKey": "fixture-split", "actionType": "SPLIT", "exDate": "2026-06-01", "description": "Stock split" }]
+  }
+}

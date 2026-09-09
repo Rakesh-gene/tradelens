@@ -16,6 +16,7 @@ from repositories.migrations import MigrationRunner
 
 
 _SORT_COLUMNS = {
+    "bestFit": "p.best_fit_score",
     "setupScore": "p.setup_score",
     "qualityScore": "p.quality_score",
     "maturityScore": "p.maturity_score",
@@ -34,6 +35,27 @@ class PostgresPatternQueryRepository:
 
     def _connect(self):
         return psycopg.connect(self._dsn)
+
+    def search_securities(self, query, limit):
+        text = str(query).strip()
+        prefix = f"{text}%"
+        return self._fetch_all(
+            """
+            SELECT isin, symbol, company_name
+            FROM nse_equities
+            WHERE series = 'EQ'
+              AND (symbol ILIKE %s OR company_name ILIKE %s)
+            ORDER BY CASE
+                       WHEN UPPER(symbol) = UPPER(%s) THEN 0
+                       WHEN symbol ILIKE %s THEN 1
+                       WHEN company_name ILIKE %s THEN 2
+                       ELSE 3
+                     END,
+                     symbol, isin
+            LIMIT %s
+            """,
+            (prefix, prefix, text, prefix, prefix, limit),
+        )
 
     def list_setups(self, filters, limit, offset):
         clauses = ["p.last_updated_date <= %(as_of)s"]
@@ -108,8 +130,28 @@ class PostgresPatternQueryRepository:
                 ORDER BY features.trading_date DESC LIMIT 1
             ) AS feature ON TRUE
             WHERE {' AND '.join(clauses)}
+            ), best_fit_pool AS (
+                SELECT p.*,
+                       ROUND(
+                           COALESCE(p.setup_score, 0) * 0.75
+                           + COALESCE(p.context_score, 0) * 0.10
+                           + COALESCE(NULLIF(p.measurements #>> '{{scoring,context_inputs,liquidity}}', '')::numeric, 0) * 0.15,
+                           2
+                       ) AS best_fit_score
+                FROM ranked_setups p WHERE security_rank = 1
+            ), ranked_best_fit AS (
+                SELECT p.*,
+                       DENSE_RANK() OVER (
+                           PARTITION BY p.state
+                           ORDER BY p.best_fit_score DESC, p.setup_score DESC NULLS LAST, p.id
+                       ) AS best_fit_rank,
+                       ROUND((PERCENT_RANK() OVER (
+                           PARTITION BY p.state ORDER BY p.best_fit_score ASC
+                       ) * 100)::numeric, 1) AS best_fit_percentile,
+                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count
+                FROM best_fit_pool p
             )
-            SELECT * FROM ranked_setups WHERE security_rank = 1
+            SELECT * FROM ranked_best_fit
             ORDER BY {sort_column} {direction} NULLS LAST, id {direction}
             LIMIT %(limit)s OFFSET %(offset)s
         """
@@ -132,9 +174,28 @@ class PostgresPatternQueryRepository:
                        ) AS security_rank
                 FROM pattern_instances AS p
                 WHERE {' AND '.join(clauses)}
+            ), best_fit_pool AS (
+                SELECT p.*,
+                       ROUND(
+                           COALESCE(p.setup_score, 0) * 0.75
+                           + COALESCE(p.context_score, 0) * 0.10
+                           + COALESCE(NULLIF(p.measurements #>> '{{scoring,context_inputs,liquidity}}', '')::numeric, 0) * 0.15,
+                           2
+                       ) AS best_fit_score
+                FROM ranked_setups p WHERE security_rank = 1
+            ), ranked_best_fit AS (
+                SELECT p.*,
+                       DENSE_RANK() OVER (
+                           PARTITION BY p.state
+                           ORDER BY p.best_fit_score DESC, p.setup_score DESC NULLS LAST, p.id
+                       ) AS best_fit_rank,
+                       ROUND((PERCENT_RANK() OVER (
+                           PARTITION BY p.state ORDER BY p.best_fit_score ASC
+                       ) * 100)::numeric, 1) AS best_fit_percentile,
+                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count
+                FROM best_fit_pool p
             ), selected_setups AS (
-                SELECT * FROM ranked_setups
-                WHERE security_rank = 1
+                SELECT * FROM ranked_best_fit
                 ORDER BY {sort_column} {direction} NULLS LAST, id {direction}
                 LIMIT %(limit)s OFFSET %(offset)s
             )
@@ -253,11 +314,41 @@ class PostgresPatternQueryRepository:
         date_clause, parameters = ("trading_date BETWEEN %s AND %s", (isin, adjustment_version, start_date, as_of)) if start_date else ("trading_date <= %s", (isin, adjustment_version, as_of))
         return self._fetch_all(
             f"""
-            SELECT trading_date, open_price, high_price, low_price, close_price, volume
-            FROM adjusted_daily_bars
-            WHERE isin = %s AND adjustment_version = %s AND {date_clause}
-            ORDER BY trading_date ASC
+            SELECT bars.trading_date, bars.open_price, bars.high_price, bars.low_price,
+                   bars.close_price, bars.volume, features.ema_20, features.sma_50,
+                   features.sma_200
+            FROM adjusted_daily_bars bars
+            LEFT JOIN LATERAL (
+                SELECT feature.ema_20, feature.sma_50, feature.sma_200
+                FROM technical_features feature
+                WHERE feature.isin = bars.isin AND feature.trading_date = bars.trading_date
+                ORDER BY feature.generated_at DESC LIMIT 1
+            ) features ON TRUE
+            WHERE bars.isin = %s AND bars.adjustment_version = %s AND {date_clause.replace('trading_date', 'bars.trading_date')}
+            ORDER BY bars.trading_date ASC
             """, parameters,
+        )
+
+    def get_latest_adjustment_version(self, isin, as_of):
+        row = self._fetch_one(
+            """SELECT adjustment_version FROM adjusted_daily_bars
+               WHERE isin = %s AND trading_date <= %s
+               ORDER BY trading_date DESC, generated_at DESC LIMIT 1""",
+            (isin, as_of),
+        )
+        return row.get("adjustment_version") if row else None
+
+    def list_chart_actions(self, isin, as_of, start_date):
+        if start_date is None:
+            return self._fetch_all(
+                """SELECT source_event_key, action_type, ex_date, raw_description
+                   FROM nse_corporate_actions WHERE isin = %s AND ex_date <= %s
+                   ORDER BY ex_date ASC, source_event_key ASC""", (isin, as_of),
+            )
+        return self._fetch_all(
+            """SELECT source_event_key, action_type, ex_date, raw_description
+               FROM nse_corporate_actions WHERE isin = %s AND ex_date BETWEEN %s AND %s
+               ORDER BY ex_date ASC, source_event_key ASC""", (isin, start_date, as_of),
         )
 
     def get_security_identity(self, isin, as_of):
@@ -327,13 +418,29 @@ class PostgresPatternQueryRepository:
 class InMemoryPatternQueryRepository:
     """Small contract-compatible query store for HTTP and service tests."""
 
-    def __init__(self, patterns=(), events=(), securities=(), features=(), bars=(), run=None):
+    def __init__(self, patterns=(), events=(), securities=(), features=(), bars=(), run=None, actions=()):
         self.patterns = [dict(value) for value in patterns]
         self.events = [dict(value) for value in events]
         self.securities = {str(value["isin"]): dict(value) for value in securities}
         self.features = [dict(value) for value in features]
         self.bars = [dict(value) for value in bars]
+        self.actions = [dict(value) for value in actions]
         self.run = dict(run or {})
+
+    def search_securities(self, query, limit):
+        text = str(query).strip().casefold()
+        rows = [
+            row for row in self.securities.values()
+            if str(row.get("symbol") or "").casefold().startswith(text)
+            or str(row.get("company_name") or "").casefold().startswith(text)
+        ]
+        rows.sort(key=lambda row: (
+            0 if str(row.get("symbol") or "").casefold() == text else
+            1 if str(row.get("symbol") or "").casefold().startswith(text) else
+            2 if str(row.get("company_name") or "").casefold().startswith(text) else 3,
+            str(row.get("symbol") or ""), str(row.get("isin") or ""),
+        ))
+        return rows[:limit]
 
     def list_setups(self, filters, limit, offset):
         rows = [self._joined(row, filters["as_of"]) for row in self.patterns if row["last_updated_date"] <= filters["as_of"]]
@@ -355,8 +462,30 @@ class InMemoryPatternQueryRepository:
         rows = list(grouped.values())
         for row in rows:
             row["evidence_count"] = sum(candidate.get("isin") == row.get("isin") for candidate in self.patterns)
+            liquidity = ((row.get("measurements") or {}).get("scoring", {}).get("context_inputs", {}).get("liquidity"))
+            row["best_fit_score"] = (
+                _decimal(row.get("setup_score")) * Decimal("0.75")
+                + _decimal(row.get("context_score")) * Decimal("0.10")
+                + _decimal(liquidity) * Decimal("0.15")
+            ).quantize(Decimal("0.01"))
+        for state in {row.get("state") for row in rows}:
+            peers = sorted(
+                (row for row in rows if row.get("state") == state),
+                key=lambda row: (-row["best_fit_score"], -_decimal(row.get("setup_score")), str(row.get("id"))),
+            )
+            previous_score = None
+            dense_rank = 0
+            for index, row in enumerate(peers):
+                if row["best_fit_score"] != previous_score:
+                    dense_rank += 1
+                    previous_score = row["best_fit_score"]
+                row["best_fit_rank"] = dense_rank
+                row["best_fit_percentile"] = Decimal("100") if len(peers) == 1 else (
+                    Decimal(len(peers) - index - 1) / Decimal(len(peers) - 1) * 100
+                ).quantize(Decimal("0.1"))
+                row["state_candidate_count"] = len(peers)
         reverse = filters["direction"] == "desc"
-        field = {"setupScore": "setup_score", "qualityScore": "quality_score", "maturityScore": "maturity_score", "detectedDate": "detected_date", "distanceToPivotPct": "distance_to_pivot_pct"}[filters["sort"]]
+        field = {"bestFit": "best_fit_score", "setupScore": "setup_score", "qualityScore": "quality_score", "maturityScore": "maturity_score", "detectedDate": "detected_date", "distanceToPivotPct": "distance_to_pivot_pct"}[filters["sort"]]
         rows.sort(key=lambda row: (row.get(field) is not None, row.get(field), str(row.get("id"))), reverse=reverse)
         return rows[offset:offset + limit + 1]
 
@@ -382,6 +511,12 @@ class InMemoryPatternQueryRepository:
     def list_chart_bars(self, isin, adjustment_version, as_of, start_date):
         rows = [row for row in self.bars if row.get("isin") == isin and row.get("adjustment_version") == adjustment_version and row.get("trading_date") <= as_of and (start_date is None or row.get("trading_date") >= start_date)]
         return sorted(rows, key=lambda row: row["trading_date"])
+    def get_latest_adjustment_version(self, isin, as_of):
+        rows = [row for row in self.bars if row.get("isin") == isin and row.get("trading_date") <= as_of and row.get("adjustment_version")]
+        rows.sort(key=lambda row: row["trading_date"])
+        return rows[-1].get("adjustment_version") if rows else None
+    def list_chart_actions(self, isin, as_of, start_date):
+        return [row for row in self.actions if row.get("isin") == isin and row.get("ex_date") <= as_of and (start_date is None or row.get("ex_date") >= start_date)]
     def get_security_identity(self, isin, as_of): return self.securities.get(isin)
     def get_latest_feature(self, isin, as_of):
         rows = [row for row in self.features if row.get("isin") == isin and row.get("trading_date") <= as_of]

@@ -1,30 +1,32 @@
 import React from 'react'
-import { formatMarketDate, formatPercent, formatPrice, formatScore, labelize } from '../formatters.js'
+import { formatMarketDate, formatPercent, formatPrice, formatScore, labelize } from '../utils/formatters.js'
+import NavigationLink from './NavigationLink.jsx'
+import { buildPatternPath } from '../routing/routes.js'
+import LifecycleBadge from './LifecycleBadge.jsx'
+import { ScoreGauge } from './ScoreBreakdown.jsx'
+import { ResourceState as SharedResourceState } from './ResourceStates.jsx'
 
 export function StateBadge({ state }) {
-  const group = ['READY', 'MATURE', 'RUNNING'].includes(state) ? 'actionable' : ['TRIGGERED', 'CONFIRMED', 'COMPLETED'].includes(state) ? 'active' : ['FAILED', 'PARTIAL', 'CANCELLED', 'INVALIDATED', 'EXPIRED'].includes(state) ? 'terminal' : 'developing'
-  return <span className={`state-badge state-badge--${group}`}><span aria-hidden="true">◆</span>{state || 'UNKNOWN'}</span>
+  return <LifecycleBadge state={state} />
 }
 
 export function Score({ label, value }) {
-  const width = Math.max(0, Math.min(100, Number(value) || 0))
-  return <div className="score"><div><span>{label}</span><strong>{formatScore(value)}</strong></div><div className="score-track" aria-hidden="true"><span style={{ width: `${width}%` }} /></div></div>
+  return <ScoreGauge label={label} value={value} />
 }
 
 export function SetupCard({ setup, onNavigate }) {
   return <article className="setup-card">
     <div className="setup-card__head"><div><p className="eyebrow">{setup.patternClass}</p><h3>{setup.security?.symbol || setup.security?.isin}</h3><p>{setup.security?.name}</p></div><StateBadge state={setup.state} /></div>
     <div className="setup-card__pattern"><strong>{setup.variant || setup.patternType}</strong><span>{setup.patternType}</span></div>
-    <div className="setup-card__metrics"><span>Setup <strong>{formatScore(setup.setupScore)}</strong></span><span>Quality <strong>{formatScore(setup.qualityScore)}</strong></span><span>Pivot <strong>{formatPrice(setup.pivotPrice)}</strong></span><span>Distance <strong>{formatPercent(setup.distanceToPivotPct)}</strong></span></div>
+    <div className="setup-card__metrics"><span>Best fit <strong>{formatScore(setup.bestFit?.score)}</strong><small>{setup.bestFit?.tier || 'UNRANKED'} · #{setup.bestFit?.rankWithinState || '—'} in {setup.state}</small></span><span>Setup <strong>{formatScore(setup.setupScore)}</strong></span><span>Quality <strong>{formatScore(setup.qualityScore)}</strong></span><span>Pivot <strong>{formatPrice(setup.pivotPrice)}</strong></span><span>Distance <strong>{formatPercent(setup.distanceToPivotPct)}</strong></span></div>
+    {setup.bestFit && <div className="best-fit-summary"><p>{setup.bestFit.strengths?.[0] || 'No leading strength identified yet.'}</p>{setup.bestFit.cautions?.[0] && <p className="muted-copy">Watch: {setup.bestFit.cautions[0]}</p>}</div>}
     <div className="tag-list">{setup.evidenceCount > 1 && <span>{setup.evidenceCount} signals</span>}{(setup.supportingPatterns || []).slice(0, 3).map((item) => <span key={item}>{item}</span>)}</div>
-    <button type="button" className="text-button" onClick={() => onNavigate(`/patterns/${setup.patternInstanceId}`)}>Inspect evidence →</button>
+    <NavigationLink className="text-button" to={buildPatternPath(setup.patternInstanceId)} onNavigate={onNavigate}>Inspect evidence →</NavigationLink>
   </article>
 }
 
 export function ResourceState({ status, error, onRetry, children }) {
-  if (status === 'loading') return <section className="loading-panel" aria-busy="true"><div /><div /><div /><p>Loading market evidence…</p></section>
-  if (status === 'error') return <section className="empty-panel" role="alert"><h2>Data unavailable</h2><p>{error.message}</p><button className="secondary-button" type="button" onClick={onRetry}>Try again</button></section>
-  return <>{children}</>
+  return <SharedResourceState status={status} error={error} onRetry={onRetry}>{children}</SharedResourceState>
 }
 
 export function MeasurementGrid({ values }) {

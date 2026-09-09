@@ -18,6 +18,10 @@ class AdminPipelineRepository(Protocol):
     def list_all_equities(self) -> list[dict[str, object]]: ...
     def get_equities(self, isins: Sequence[str]) -> list[dict[str, object]]: ...
     def create_pipeline_run(self, values: Mapping[str, object], securities: Sequence[Mapping[str, object]]) -> str: ...
+    def scheduled_pipeline_run_exists(self, scheduled_for: date) -> bool: ...
+    def get_scheduled_pipeline_run(self, scheduled_for: date) -> dict[str, object] | None: ...
+    def active_pipeline_run_exists(self) -> bool: ...
+    def fail_interrupted_pipeline_runs(self) -> int: ...
     def update_pipeline_run(self, run_id: str, status: str, **values: object) -> None: ...
     def pipeline_run_status(self, run_id: str) -> str | None: ...
     def pause_pipeline_run(self, run_id: str) -> bool: ...
@@ -96,7 +100,14 @@ class AdminPipelineService:
             )
         }
 
-    def start(self, payload: Mapping[str, object], requested_by: str) -> dict[str, object]:
+    def start(
+        self,
+        payload: Mapping[str, object],
+        requested_by: str | None,
+        *,
+        trigger_source: str = "MANUAL",
+        scheduled_for: date | None = None,
+    ) -> dict[str, object]:
         raw_isins = payload.get("isins")
         run_all = payload.get("allEquities") is True
         if raw_isins is None:
@@ -147,13 +158,41 @@ class AdminPipelineService:
             "run_scope": "ALL" if run_all else "SELECTION",
             "batch_size": batch_size,
             "status": "PENDING",
+            "trigger_source": trigger_source,
+            "scheduled_for": scheduled_for,
         }
         run_id = self._repository.create_pipeline_run(values, ordered)
         self._executor(lambda: self._execute(
             run_id, ordered, from_date, to_date, versions,
-            values["force_refresh"], batch_size,
+            values["force_refresh"], batch_size, trigger_source=trigger_source,
         ))
         return self.get_run(run_id)
+
+    def ensure_scheduled_run(self, scheduled_for: date, *, batch_size: int = 25) -> str:
+        """Start today's incremental run once no other pipeline run is active."""
+        existing = self._repository.get_scheduled_pipeline_run(scheduled_for)
+        if existing is not None:
+            if (
+                existing.get("status") in {"FAILED", "PARTIAL"}
+                and int(existing.get("resume_count") or 0) < 2
+            ):
+                self.resume(str(existing["id"]))
+                return "RESUMED"
+            return "ALREADY_SCHEDULED"
+        if self._repository.active_pipeline_run_exists():
+            return "ACTIVE_RUN"
+        self.start(
+            {"allEquities": True, "batchSize": batch_size, "forceRefresh": False,
+             "toDate": scheduled_for.isoformat()},
+            None,
+            trigger_source="SCHEDULED",
+            scheduled_for=scheduled_for,
+        )
+        return "STARTED"
+
+    def recover_interrupted_runs(self) -> int:
+        """Make process-local work interrupted by a prior shutdown resumable."""
+        return self._repository.fail_interrupted_pipeline_runs()
 
     def pause(self, run_id: str) -> dict[str, object]:
         run = self._require_run(run_id)
@@ -192,6 +231,7 @@ class AdminPipelineService:
             bool(run.get("force_refresh")),
             int(run.get("batch_size") or self.DEFAULT_BATCH_SIZE),
             completed=completed,
+            trigger_source=str(run.get("trigger_source") or "MANUAL"),
         ))
         return self.get_run(run_id)
 
@@ -203,7 +243,7 @@ class AdminPipelineService:
 
     def _execute(
         self, run_id, securities, from_date, to_date, versions, force_refresh,
-        batch_size, *, completed=0,
+        batch_size, *, completed=0, trigger_source="MANUAL",
     ):
         failed = 0
         errors = []
@@ -220,6 +260,7 @@ class AdminPipelineService:
                     pool.submit(
                         self._process_security,
                         run_id, security, from_date, to_date, versions, force_refresh,
+                        trigger_source,
                     ): security
                     for security in batch
                 }
@@ -257,6 +298,7 @@ class AdminPipelineService:
 
     def _process_security(
         self, run_id, security, from_date, to_date, versions, force_refresh,
+        trigger_source,
     ):
         if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
             return None
@@ -267,7 +309,8 @@ class AdminPipelineService:
         try:
             imported = self._history.run(BackfillRequest(
                 from_date=from_date, to_date=to_date, isin=isin,
-                batch_size=1, force=force_refresh, initiated_by="manual",
+                batch_size=1, force=force_refresh,
+                initiated_by="scheduler" if trigger_source == "SCHEDULED" else "manual",
             ))
             item = imported.securities[0] if imported.securities else None
             if imported.status not in {ImportStatus.COMPLETED, None} or item is None or item.error:
@@ -320,6 +363,8 @@ class DisabledAdminPipelineService:
     def list_runs(self, query): return {"items": [], "page": 1, "pageSize": 10, "totalItems": 0, "totalPages": 0}
     def get_run(self, run_id, query=None): raise LookupError("Pipeline run not found")
     def start(self, payload, requested_by): raise RuntimeError("Admin pipeline is not configured")
+    def ensure_scheduled_run(self, scheduled_for, *, batch_size=25): return "DISABLED"
+    def recover_interrupted_runs(self): return 0
     def pause(self, run_id): raise RuntimeError("Admin pipeline is not configured")
     def resume(self, run_id): raise RuntimeError("Admin pipeline is not configured")
     def terminate(self, run_id): raise RuntimeError("Admin pipeline is not configured")
@@ -341,6 +386,8 @@ def _run_payload(row, *, include_items, item_page=1, item_page_size=25):
         "fromDate": row.get("requested_from_date"), "toDate": row.get("requested_to_date"),
         "versions": row.get("versions") or {}, "forceRefresh": bool(row.get("force_refresh")),
         "runScope": row.get("run_scope") or "SELECTION",
+        "triggerSource": row.get("trigger_source") or "MANUAL",
+        "scheduledFor": row.get("scheduled_for"),
         "batchSize": row.get("batch_size") or AdminPipelineService.DEFAULT_BATCH_SIZE,
         "securitiesTotal": row.get("securities_total", 0),
         "securitiesCompleted": row.get("securities_completed", 0),

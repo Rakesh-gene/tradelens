@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { apiGet, apiPost } from '../apiClient.js'
+import { controlPipelineRun, createPipelineRun, getAdminEquities, getPipelineRun, getPipelineRuns } from '../api/adminApi.js'
 import useApiResource from '../useApiResource.js'
 import { PageIntro, ResourceState, StateBadge } from '../components/PatternUi.jsx'
-import { formatMarketDate } from '../formatters.js'
+import { formatMarketDate } from '../utils/formatters.js'
 
 const TERMINAL = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'PAUSED', 'TERMINATED', 'CANCELLED'])
 
@@ -25,8 +25,8 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   const [submitting, setSubmitting] = useState(false)
   const [controlling, setControlling] = useState('')
   const equityKey = new URLSearchParams({ page: String(page), pageSize: '25', ...(search ? { search } : {}) }).toString()
-  const equities = useApiResource(equityKey, (signal) => apiGet(`/api/admin/equities?${equityKey}`, { signal, onUnauthorized }))
-  const recent = useApiResource('admin-pipeline-runs', (signal) => apiGet('/api/admin/pipeline/runs?page=1&pageSize=8', { signal, onUnauthorized }))
+  const equities = useApiResource(equityKey, (signal) => getAdminEquities({ page, pageSize: 25, search }, { signal, onUnauthorized }))
+  const recent = useApiResource('admin-pipeline-runs', (signal) => getPipelineRuns({ page: 1, pageSize: 8 }, { signal, onUnauthorized }))
   const pageIsins = useMemo(() => (equities.data?.items || []).map((item) => item.isin), [equities.data])
   const allPageSelected = pageIsins.length > 0 && pageIsins.every((isin) => selected.has(isin))
   const running = activeRun && !TERMINAL.has(activeRun.status)
@@ -34,7 +34,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   useEffect(() => {
     if (!running) return undefined
     const poll = window.setInterval(() => {
-      apiGet(`/api/admin/pipeline/runs/${activeRun.runId}?itemPage=${itemPage}&itemPageSize=25`, { onUnauthorized })
+      getPipelineRun(activeRun.runId, { itemPage, itemPageSize: 25 }, { onUnauthorized })
         .then((payload) => setActiveRun(payload.run))
         .catch((error) => setActionError(error.message))
     }, 2000)
@@ -58,7 +58,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   const startRun = async (runAll = false) => {
     setSubmitting(runAll ? 'all' : 'selection'); setActionError('')
     try {
-      const payload = await apiPost('/api/admin/pipeline/runs', {
+      const payload = await createPipelineRun({
         ...(runAll ? { allEquities: true } : { isins: [...selected] }),
         fromDate, toDate, forceRefresh, batchSize: Number(batchSize),
       }, { onUnauthorized })
@@ -72,7 +72,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   const openRun = async (runId) => {
     setActionError('')
     setItemPage(1)
-    try { setActiveRun((await apiGet(`/api/admin/pipeline/runs/${runId}?itemPage=1&itemPageSize=25`, { onUnauthorized })).run) }
+    try { setActiveRun((await getPipelineRun(runId, { itemPage: 1, itemPageSize: 25 }, { onUnauthorized })).run) }
     catch (error) { setActionError(error.message) }
   }
 
@@ -80,7 +80,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
     if (!activeRun) return
     setActionError('')
     try {
-      const payload = await apiGet(`/api/admin/pipeline/runs/${activeRun.runId}?itemPage=${nextPage}&itemPageSize=25`, { onUnauthorized })
+      const payload = await getPipelineRun(activeRun.runId, { itemPage: nextPage, itemPageSize: 25 }, { onUnauthorized })
       setItemPage(nextPage)
       setActiveRun(payload.run)
     } catch (error) { setActionError(error.message) }
@@ -90,9 +90,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
     if (!activeRun) return
     setControlling(action); setActionError('')
     try {
-      const payload = await apiPost(
-        `/api/admin/pipeline/runs/${activeRun.runId}/${action}`, {}, { onUnauthorized }
-      )
+      const payload = await controlPipelineRun(activeRun.runId, action, { onUnauthorized })
       setActiveRun(payload.run)
       recent.reload()
     } catch (error) { setActionError(error.message) }

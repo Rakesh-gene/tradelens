@@ -71,11 +71,112 @@ class ConcurrentOpener:
                 self._active -= 1
 
 
+class OpenerFactoryTracker:
+    def __init__(self) -> None:
+        self._barrier = Barrier(2)
+        self._lock = Lock()
+        self.created = []
+        self.active = 0
+        self.max_active = 0
+
+    def create(self):
+        opener = PerThreadOpener(self)
+        with self._lock:
+            self.created.append(opener)
+        return opener
+
+
+class PerThreadOpener:
+    def __init__(self, tracker: OpenerFactoryTracker) -> None:
+        self._tracker = tracker
+
+    def open(self, request, timeout: float):
+        with self._tracker._lock:
+            self._tracker.active += 1
+            self._tracker.max_active = max(
+                self._tracker.max_active, self._tracker.active
+            )
+        try:
+            self._tracker._barrier.wait(timeout=2)
+            return FakeResponse(_fixture("equity_history_empty.json"))
+        finally:
+            with self._tracker._lock:
+                self._tracker.active -= 1
+
+
 def _fixture(name: str) -> bytes:
     return (FIXTURE_DIRECTORY / name).read_bytes()
 
 
 class NseApiClientTestCase(unittest.TestCase):
+    def test_each_worker_thread_uses_an_independent_http_session(self) -> None:
+        tracker = OpenerFactoryTracker()
+        client = NseApiClient(
+            opener_factory=tracker.create,
+            max_requests_per_second=1000,
+            sleeper=lambda _: None,
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    client.fetch_equity_history,
+                    symbol,
+                    date(2026, 9, 4),
+                    date(2026, 9, 4),
+                )
+                for symbol in ("EXAMPLE", "OTHER")
+            ]
+            self.assertEqual([[], []], [future.result() for future in futures])
+
+        self.assertEqual(2, len(tracker.created))
+        self.assertEqual(2, tracker.max_active)
+
+    def test_timeout_recycles_worker_session_before_retry(self) -> None:
+        openers = deque([
+            QueueOpener([TimeoutError("stale session")]),
+            QueueOpener([FakeResponse(_fixture("equity_history_empty.json"))]),
+        ])
+        client = NseApiClient(
+            opener_factory=openers.popleft,
+            max_retries=1,
+            sleeper=lambda _: None,
+        )
+
+        records = client.fetch_equity_history(
+            "EXAMPLE", date(2026, 9, 4), date(2026, 9, 4)
+        )
+
+        self.assertEqual([], records)
+        self.assertEqual(1, client.metrics["sessionResets"])
+        self.assertEqual(2, client.metrics["requestAttempts"])
+
+    def test_repeated_transport_failures_open_shared_cooldown_gate(self) -> None:
+        sleeps = []
+        openers = deque([
+            QueueOpener([TimeoutError("first")]),
+            QueueOpener([TimeoutError("second")]),
+            QueueOpener([FakeResponse(_fixture("equity_history_empty.json"))]),
+        ])
+        client = NseApiClient(
+            opener_factory=openers.popleft,
+            max_retries=2,
+            max_requests_per_second=1000,
+            circuit_breaker_threshold=2,
+            circuit_breaker_cooldown_seconds=7,
+            sleeper=sleeps.append,
+            random_value=lambda: 0.0,
+        )
+
+        self.assertEqual(
+            [],
+            client.fetch_equity_history(
+                "EXAMPLE", date(2026, 9, 4), date(2026, 9, 4)
+            ),
+        )
+        self.assertEqual(1, client.metrics["circuitBreakerTrips"])
+        self.assertTrue(any(delay >= 6.9 for delay in sleeps))
+
     def test_slow_responses_do_not_hold_the_shared_request_slot_lock(self) -> None:
         opener = ConcurrentOpener()
         client = NseApiClient(

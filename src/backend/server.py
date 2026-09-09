@@ -16,6 +16,7 @@ from data_pipeline.history_backfill import HistoryBackfillService
 from data_pipeline.nse_api import NseApiClient
 from operations.admin_pipeline import AdminPipelineService, DisabledAdminPipelineService
 from operations.monitoring import StructuredEventLogger
+from operations.pipeline_scheduler import DailyPipelineScheduler, parse_schedule_time
 from operations.recovery import RecoveryService
 from pattern_engine.configuration import load_pattern_engine_configuration
 from pattern_engine.query_service import PatternQueryService
@@ -85,13 +86,15 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
         operations_repository = PostgresOperationsRepository(dsn, apply_migrations=False)
         event_logger = StructuredEventLogger(operations_repository)
         nse_client = NseApiClient()
+        admin_pipeline_repository = PostgresAdminPipelineRepository(dsn, apply_migrations=False)
         admin_pipeline_service = AdminPipelineService(
-            PostgresAdminPipelineRepository(dsn, apply_migrations=False),
+            admin_pipeline_repository,
             HistoryBackfillService(market_repository, nse_client, event_logger=event_logger),
             RecoveryService(market_repository, runner, configuration, logger=event_logger),
             configuration, logger=event_logger,
             max_workers=max(1, min(8, int(os.getenv("ADMIN_PIPELINE_WORKERS", "3")))),
         )
+        admin_pipeline_service.recover_interrupted_runs()
     admin_pipeline_service = admin_pipeline_service or DisabledAdminPipelineService()
 
     class ConfiguredApiHandler(ApiHandler):
@@ -102,3 +105,17 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
     ConfiguredApiHandler.research_service = research_service
     ConfiguredApiHandler.admin_pipeline_service = admin_pipeline_service
     return ThreadingHTTPServer((host, port), ConfiguredApiHandler)
+
+
+def create_pipeline_scheduler(server: ThreadingHTTPServer):
+    enabled = os.getenv("PIPELINE_SCHEDULER_ENABLED", "true").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None
+    service = server.RequestHandlerClass.admin_pipeline_service
+    if isinstance(service, DisabledAdminPipelineService):
+        return None
+    schedule_time = parse_schedule_time(os.getenv("PIPELINE_SCHEDULE_TIME", "19:00"))
+    batch_size = int(os.getenv("PIPELINE_SCHEDULE_BATCH_SIZE", "25"))
+    return DailyPipelineScheduler(
+        service, schedule_time=schedule_time, batch_size=batch_size
+    )

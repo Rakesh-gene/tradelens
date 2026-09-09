@@ -1,4 +1,5 @@
 import AuthForm from '../components/AuthForm.jsx'
+import { login } from '../api/authApi.js'
 
 import React from 'react'
 
@@ -21,7 +22,7 @@ const loginFields = [
   },
 ]
 
-export default function LoginPage({ onAuthenticated }) {
+export default function LoginPage({ notice, onAuthenticated }) {
   return (
     <main className="login-shell">
       <section className="left-panel" aria-hidden="true">
@@ -53,6 +54,7 @@ export default function LoginPage({ onAuthenticated }) {
       </section>
 
       <section className="right-panel" aria-label="Login form">
+        {notice && <p className="form-message success" role="status">{notice}</p>}
         <AuthForm
           title="Welcome back."
           description={{
@@ -79,23 +81,7 @@ export default function LoginPage({ onAuthenticated }) {
             </div>
           }
           onSubmit={async (values) => {
-            const response = await fetch('/api/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(values),
-            })
-            const responseBody = await response.text()
-            let payload = {}
-            if (responseBody) {
-              try {
-                payload = JSON.parse(responseBody)
-              } catch {
-                throw new Error('The sign-in service returned an invalid response. Please try again.')
-              }
-            }
-            if (!response.ok) {
-              throw new Error(payload.error || 'The sign-in service is unavailable. Please try again.')
-            }
+            const payload = await login(values)
             if (!payload.accessToken || !payload.user) {
               throw new Error('The sign-in service returned an incomplete response. Please try again.')
             }

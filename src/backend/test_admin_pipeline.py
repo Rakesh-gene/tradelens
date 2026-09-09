@@ -24,6 +24,23 @@ class PipelineRepository:
 
     def get_equities(self, isins): return [row for row in self.equities if row["isin"] in isins]
     def list_all_equities(self): return list(self.equities)
+    def scheduled_pipeline_run_exists(self, scheduled_for):
+        return self.get_scheduled_pipeline_run(scheduled_for) is not None
+    def get_scheduled_pipeline_run(self, scheduled_for):
+        return next((
+            run for run in self.runs.values()
+            if run.get("trigger_source") == "SCHEDULED"
+            and run.get("scheduled_for") == scheduled_for
+        ), None)
+    def active_pipeline_run_exists(self):
+        return any(run.get("status") in {"PENDING", "RUNNING", "PAUSED"} for run in self.runs.values())
+    def fail_interrupted_pipeline_runs(self):
+        interrupted = 0
+        for run in self.runs.values():
+            if run.get("status") in {"PENDING", "RUNNING"}:
+                run["status"] = "FAILED"
+                interrupted += 1
+        return interrupted
     def create_pipeline_run(self, values, securities):
         run_id = "admin-run-1"
         self.runs[run_id] = {"id": run_id, **dict(values), "securities_total": len(securities), "securities_completed": 0, "securities_failed": 0, "items": [{"isin": row["isin"], "symbol": row["symbol"], "status": "PENDING", "current_stage": "QUEUED"} for row in securities]}
@@ -217,6 +234,56 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "batchSize"):
             service.start({"allEquities": True, "batchSize": 101}, "admin-1")
 
+    def test_scheduled_run_is_incremental_unattended_and_idempotent(self):
+        service = self._service()
+
+        first = service.ensure_scheduled_run(date(2026, 9, 7), batch_size=1)
+        second = service.ensure_scheduled_run(date(2026, 9, 7), batch_size=1)
+
+        self.assertEqual("STARTED", first)
+        self.assertEqual("ALREADY_SCHEDULED", second)
+        run = self.repository.runs["admin-run-1"]
+        self.assertIsNone(run["requested_by"])
+        self.assertEqual("SCHEDULED", run["trigger_source"])
+        self.assertEqual(date(2026, 9, 7), run["scheduled_for"])
+        self.assertFalse(run["force_refresh"])
+        self.assertTrue(all(request.initiated_by == "scheduler" for request in self.history.requests))
+
+    def test_interrupted_scheduled_run_is_automatically_resumed_once(self):
+        service = self._service({"INE467B01029"})
+        self.assertEqual("STARTED", service.ensure_scheduled_run(date(2026, 9, 7)))
+        self.assertEqual("PARTIAL", self.repository.runs["admin-run-1"]["status"])
+
+        self.history.failed.clear()
+        self.assertEqual("RESUMED", service.ensure_scheduled_run(date(2026, 9, 7)))
+        self.assertEqual("COMPLETED", self.repository.runs["admin-run-1"]["status"])
+
+    def test_scheduled_run_waits_while_another_run_is_active(self):
+        actions = []
+        self.repository = PipelineRepository()
+        service = AdminPipelineService(
+            self.repository, HistoryService(), RecoveryService(),
+            load_pattern_engine_configuration(), executor=actions.append,
+            today=lambda: date(2026, 9, 7), max_workers=1,
+        )
+        service.start({"allEquities": True}, "admin-1")
+
+        self.assertEqual(
+            "ACTIVE_RUN", service.ensure_scheduled_run(date(2026, 9, 7))
+        )
+
+    def test_interrupted_runs_are_recovered_as_failed_on_startup(self):
+        actions = []
+        service = AdminPipelineService(
+            self.repository if hasattr(self, "repository") else PipelineRepository(),
+            HistoryService(), RecoveryService(), load_pattern_engine_configuration(),
+            executor=actions.append, max_workers=1,
+        )
+        service.start({"allEquities": True}, "admin-1")
+
+        self.assertEqual(1, service.recover_interrupted_runs())
+        self.assertEqual("FAILED", service.list_runs({})["items"][0]["status"])
+
     def test_unknown_and_oversized_selection_are_rejected_before_scheduling(self):
         service = self._service()
         with self.assertRaisesRegex(ValueError, "Unknown"):
@@ -252,6 +319,14 @@ class AdminPipelineMigrationTestCase(unittest.TestCase):
         self.assertIn("ADD COLUMN IF NOT EXISTS resume_count", sql)
         self.assertIn("ADD COLUMN IF NOT EXISTS attempt_count", sql)
 
+    def test_scheduler_migration_supports_one_unattended_run_per_day(self):
+        sql = (Path(__file__).resolve().parent / "migrations" / "021_add_pipeline_scheduling.sql").read_text(encoding="utf-8")
+
+        self.assertIn("ALTER COLUMN requested_by DROP NOT NULL", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS trigger_source", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS scheduled_for", sql)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS", sql)
+
 
 class AdminPipelineRepositoryTestCase(unittest.TestCase):
     def test_blank_equity_search_is_explicitly_typed_for_postgres(self):
@@ -280,6 +355,32 @@ class AdminPipelineRepositoryTestCase(unittest.TestCase):
         self.assertIn("WHERE series = 'EQ'", repository.statement[0])
         self.assertIn("ORDER BY symbol, isin", repository.statement[0])
         self.assertNotIn("LIMIT", repository.statement[0])
+
+    def test_interrupted_item_update_qualifies_columns_shared_with_run_table(self):
+        class RecordingCursor:
+            def __init__(self): self.statements = []
+            def execute(self, statement, parameters=None): self.statements.append(statement)
+            def fetchall(self): return []
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+
+        class RecordingConnection:
+            def __init__(self): self.recording_cursor = RecordingCursor()
+            def cursor(self): return self.recording_cursor
+            def commit(self): pass
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+
+        class RecordingRepository(PostgresAdminPipelineRepository):
+            def __init__(self): self.connection = RecordingConnection()
+            def _connect(self): return self.connection
+
+        repository = RecordingRepository()
+        repository.fail_interrupted_pipeline_runs()
+
+        item_update = repository.connection.recording_cursor.statements[0]
+        self.assertIn("COALESCE(item.error_message", item_update)
+        self.assertIn("COALESCE(item.finished_at", item_update)
 
 
 if __name__ == "__main__":

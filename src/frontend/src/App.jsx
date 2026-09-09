@@ -1,75 +1,137 @@
-import React, { useEffect, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import LoginPage from './pages/LoginPage.jsx'
 import SignupPage from './pages/SignupPage.jsx'
-import OverviewPage from './pages/OverviewPage.jsx'
-import SetupsPage from './pages/SetupsPage.jsx'
-import PatternDetailPage from './pages/PatternDetailPage.jsx'
-import SecurityPage from './pages/SecurityPage.jsx'
-import AdminPipelinePage from './pages/AdminPipelinePage.jsx'
+import NotFoundPage from './pages/NotFoundPage.jsx'
 import AppShell from './components/AppShell.jsx'
-import { TOKEN_KEY } from './apiClient.js'
+import { getCurrentUser } from './api/authApi.js'
+import { clearAccessToken, readAccessToken, writeAccessToken } from './auth/authSession.js'
+import { isProtectedRoute, matchRoute } from './routing/routes.js'
+import { rememberCurrentSetupsLocation, rememberedSetupsLocation } from './setupNavigation.js'
 
-function locationPath() { return window.location.pathname.replace(/\/+$/, '') || '/' }
-function protectedPath(path) { return path === '/overview' || path === '/setups' || path === '/admin/pipeline' || path.startsWith('/patterns/') || path.startsWith('/securities/') }
+const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'))
+const SetupsPage = lazy(() => import('./pages/SetupsPage.jsx'))
+const PatternDetailPage = lazy(() => import('./pages/PatternDetailPage.jsx'))
+const SecurityPage = lazy(() => import('./pages/SecurityPage.jsx'))
+const AdminPipelinePage = lazy(() => import('./pages/AdminPipelinePage.jsx'))
+
+function currentLocation() {
+  return `${window.location.pathname}${window.location.search}`
+}
 
 export default function App() {
-  const [pathname, setPathname] = useState(locationPath)
+  const [location, setLocation] = useState(currentLocation)
   const [user, setUser] = useState(null)
   const [checkingSession, setCheckingSession] = useState(true)
-  const navigate = (next, replace = false) => { window.history[replace ? 'replaceState' : 'pushState']({}, '', next); setPathname(next.split('?')[0].replace(/\/+$/, '') || '/') }
+  const [sessionError, setSessionError] = useState('')
+  const [sessionRevision, setSessionRevision] = useState(0)
+  const [authNotice, setAuthNotice] = useState('')
+  const route = matchRoute(window.location.pathname)
 
-  useEffect(() => { const pop = () => setPathname(locationPath()); window.addEventListener('popstate', pop); return () => window.removeEventListener('popstate', pop) }, [])
+  const navigate = (next, { replace = false } = {}) => {
+    rememberCurrentSetupsLocation()
+    const destination = next === '/setups' ? rememberedSetupsLocation() : next
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', destination)
+    setLocation(currentLocation())
+  }
+
   useEffect(() => {
-    if (!protectedPath(pathname)) { setCheckingSession(false); return }
-    if (!window.sessionStorage.getItem(TOKEN_KEY)) { setUser(null); navigate('/', true); setCheckingSession(false); return }
+    const handlePopState = () => setLocation(currentLocation())
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    if (!isProtectedRoute(route)) {
+      setCheckingSession(false)
+      setSessionError('')
+      return undefined
+    }
+    if (!readAccessToken()) {
+      setUser(null)
+      navigate('/', { replace: true })
+      setCheckingSession(false)
+      return undefined
+    }
+
     setCheckingSession(true)
+    setSessionError('')
     const controller = new AbortController()
     const validateSession = (initial = false) => {
-      const token = window.sessionStorage.getItem(TOKEN_KEY)
+      const token = readAccessToken()
       if (!token) return Promise.resolve()
-      return fetch('/api/auth/me', { signal: controller.signal, headers: { Authorization: `Bearer ${token}` } })
-        .then(async (response) => {
-          if (response.status === 401) {
-            const error = new Error('Session expired')
-            error.unauthorized = true
-            throw error
-          }
-          if (!response.ok) throw new Error(`Session validation failed (${response.status})`)
-          return response.json()
-        })
+      return getCurrentUser(token, { signal: controller.signal })
         .then((payload) => {
-          if (payload.accessToken) window.sessionStorage.setItem(TOKEN_KEY, payload.accessToken)
+          if (payload.accessToken) writeAccessToken(payload.accessToken)
           setUser(payload.user)
-          if (pathname === '/admin/pipeline' && !payload.user?.isAdmin) navigate('/overview', true)
+          setSessionError('')
+          if (route.admin && !payload.user?.isAdmin && !payload.user?.is_admin) {
+            navigate('/overview', { replace: true })
+          }
         })
         .catch((error) => {
-          if (error.name !== 'AbortError' && error.unauthorized) {
-            window.sessionStorage.removeItem(TOKEN_KEY); setUser(null); navigate('/', true)
+          if (error.name === 'AbortError') return
+          if (error.status === 401) {
+            clearAccessToken()
+            setUser(null)
+            setAuthNotice('Your session expired. Please sign in again.')
+            navigate('/', { replace: true })
+          } else {
+            setSessionError(error.message || 'TradeLens could not validate your session.')
           }
         })
         .finally(() => { if (initial) setCheckingSession(false) })
     }
+
     validateSession(true)
     const timer = window.setInterval(validateSession, 5 * 60 * 1000)
-    const onVisibilityChange = () => { if (document.visibilityState === 'visible') validateSession() }
-    document.addEventListener('visibilitychange', onVisibilityChange)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') validateSession()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       controller.abort()
       window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [pathname])
+  }, [location, sessionRevision])
 
-  const authenticated = (token, nextUser) => { window.sessionStorage.setItem(TOKEN_KEY, token); setUser(nextUser); navigate('/overview') }
-  const signOut = () => { window.sessionStorage.removeItem(TOKEN_KEY); setUser(null); navigate('/', true) }
-  if (pathname === '/signup') return <SignupPage />
-  if (!protectedPath(pathname)) return <LoginPage onAuthenticated={authenticated} />
+  const authenticated = (token, nextUser) => {
+    writeAccessToken(token)
+    setUser(nextUser)
+    setAuthNotice('')
+    navigate('/overview', { replace: true })
+  }
+  const registered = () => {
+    setAuthNotice('Account created. Sign in with your new credentials.')
+    navigate('/', { replace: true })
+  }
+  const signOut = () => {
+    clearAccessToken()
+    setUser(null)
+    setAuthNotice('You have signed out.')
+    navigate('/', { replace: true })
+  }
+
+  if (route.name === 'signup') return <SignupPage onRegistered={registered} />
+  if (route.name === 'login') return <LoginPage notice={authNotice} onAuthenticated={authenticated} />
+  if (!isProtectedRoute(route)) return <NotFoundPage onNavigate={navigate} />
   if (checkingSession) return <main className="session-loading">Validating your session…</main>
+  if (sessionError) {
+    return <main className="standalone-state">
+      <p className="eyebrow">Session check unavailable</p>
+      <h1>We could not verify your session.</h1>
+      <p>{sessionError}</p>
+      <button className="primary-button" type="button" onClick={() => { setCheckingSession(true); setSessionRevision((value) => value + 1) }}>Try again</button>
+    </main>
+  }
+
   const common = { onNavigate: navigate, onUnauthorized: signOut }
-  let page = <OverviewPage {...common} />
-  if (pathname === '/setups') page = <SetupsPage {...common} />
-  else if (pathname.startsWith('/patterns/')) page = <PatternDetailPage patternId={decodeURIComponent(pathname.slice(10))} {...common} />
-  else if (pathname.startsWith('/securities/')) page = <SecurityPage isin={decodeURIComponent(pathname.slice(12))} {...common} />
-  else if (pathname === '/admin/pipeline' && (user?.isAdmin || user?.is_admin)) page = <AdminPipelinePage {...common} />
-  return <AppShell user={user} onNavigate={navigate} onSignOut={signOut}>{page}</AppShell>
+  let page = <NotFoundPage onNavigate={navigate} />
+  if (route.name === 'overview') page = <OverviewPage {...common} />
+  else if (route.name === 'setups') page = <SetupsPage key={location} {...common} />
+  else if (route.name === 'pattern-detail') page = <PatternDetailPage patternId={route.params.patternId} {...common} />
+  else if (route.name === 'security') page = <SecurityPage isin={route.params.isin} {...common} />
+  else if (route.name === 'admin-pipeline' && (user?.isAdmin || user?.is_admin)) page = <AdminPipelinePage {...common} />
+
+  return <AppShell user={user} onNavigate={navigate} onSignOut={signOut}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>
 }

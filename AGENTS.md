@@ -125,7 +125,7 @@ Treat the following as the default browser/server integration surface:
 | `GET /api/setups` | Filtered, server-sorted, cursor-paginated setup summaries and facets |
 | `GET /api/patterns/{id}` | Complete pattern evidence, measurements, scores, and lineage |
 | `GET /api/patterns/{id}/events` | Immutable lifecycle timeline |
-| `GET /api/securities?query=...` | Eligible-security search |
+| `GET /api/securities/search?q=...` | Authenticated symbol/company-name search returning stable ISINs |
 | `GET /api/securities/{isin}/fingerprint` | Standard technical fingerprint |
 | `GET /api/securities/{isin}/chart` | Bounded adjusted bars, indicators, levels, actions, and events |
 | `POST /api/research/runs` | Start asynchronous historical research |
@@ -185,6 +185,26 @@ External exchange behavior is isolated in `data_pipeline/`.
   PEP-8 `download_equities()` alias when extending this collector.
 - Validate downloaded schemas before persisting rows. Do not store an HTML
   error response or malformed CSV as market data.
+- The backend process owns the unattended all-equities schedule. It runs an
+  incremental pipeline at 19:00 Asia/Kolkata, records `SCHEDULED` as its
+  trigger, and must not overlap another active run or create the same day's
+  scheduled run twice. Interrupted scheduled work may retry automatically at
+  most twice, preserving completed equities. Keep its time and batch size
+  configurable through the documented environment variables.
+
+### Opportunity ranking
+
+- Detection state and opportunity ranking are separate concerns. Rank only
+  active lifecycle states (`DETECTED` through `CONFIRMED`); terminal states are
+  retained as evidence but excluded from best-fit ranking.
+- Compare best-fit candidates within the same lifecycle state. Do not make an
+  early forming structure compete directly with a triggered or confirmed one.
+- `best-fit-v1` combines the persisted setup score (75%), context score (10%),
+  and liquidity evidence (15%). Keep the API response explainable with peer
+  rank, percentile, evidence completeness, strengths, and cautions.
+- Best-fit and setup scores are ranking evidence, never probability of profit.
+  Historical probability remains null until completed point-in-time backtests
+  provide the configured minimum sample size.
 - Full-universe reruns are incremental unless an administrator explicitly
   requests a force refresh: plan price requests from each security's stored
   maximum session, retain the configured historical floor as calculation
@@ -378,9 +398,11 @@ change.
   checks, and session restoration.
 - Page-level views belong in `src/frontend/src/pages/`.
 - Reusable form/UI behavior belongs in `src/frontend/src/components/`.
-- Keep the low-level `fetch` call in `src/frontend/src/apiClient.js` and use
-  `useApiResource.js` for abortable, stale-response-safe page requests. Generic
-  presentational components never fetch, read session storage, or navigate.
+- Keep the only low-level `fetch` call in `src/frontend/src/api/apiClient.js`.
+  Put endpoint contracts in focused modules under `src/frontend/src/api/`,
+  token storage in `auth/authSession.js`, and use `useApiResource.js` for
+  abortable, stale-response-safe page requests. Generic presentational
+  components never fetch or read session storage.
 - Keep `sessionStorage` and History API ownership at the app/page boundary;
   formatting and query parsing stay in focused pure utilities.
 - The access token is stored in `sessionStorage` under
@@ -398,7 +420,8 @@ change.
 ### Client routes and navigation
 
 The normal route set is `/`, `/signup`, `/overview`, `/setups`,
-`/patterns/:patternId`, `/securities/:isin`, and later `/research`.
+`/patterns/:patternId`, `/securities/:isin`, `/research`, and
+`/research/:runId` for shareable historical results.
 
 - Preserve the small History API router. Put dynamic matching and path builders
   in `src/frontend/src/routing/routes.js`; do not add React Router by default.
@@ -421,6 +444,9 @@ The normal route set is `/`, `/signup`, `/overview`, `/setups`,
   is not a user-facing error, and a late response must not replace newer data.
 - A server-side collection owns filtering, sorting, facets, and cursor
   pagination. Default setup page size is 25 unless measurement changes it.
+- Research pages must keep setup ranking separate from observed outcomes,
+  state sample adequacy, and display engine/configuration/feature/adjustment
+  lineage with the point-in-time universe policy.
 - Every server-backed page/region defines initial loading, refreshing, empty,
   partial, stale, unauthorized, forbidden, not-found, and retryable error
   behavior as applicable.

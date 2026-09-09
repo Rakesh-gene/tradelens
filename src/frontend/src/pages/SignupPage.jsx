@@ -1,4 +1,5 @@
 import AuthForm from '../components/AuthForm.jsx'
+import { register } from '../api/authApi.js'
 
 import React from 'react'
 
@@ -26,7 +27,7 @@ const signupFields = [
   },
 ]
 
-export default function SignupPage() {
+export default function SignupPage({ onRegistered }) {
   return (
     <main className="login-shell login-shell--signup">
       <section className="signup-aside" aria-hidden="true">
@@ -68,18 +69,10 @@ export default function SignupPage() {
         submitLabel="Create account"
         footer={null}
         onSubmit={async (values) => {
-          const response = await fetch('/api/register', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(values),
-          })
-
-          const payload = await response.json()
-          if (!response.ok) {
-            throw new Error(payload.error || 'Registration failed')
-          }
+          if (!values.email || !values.password || !values.confirmPassword) throw new Error('Complete all registration fields.')
+          if (values.password !== values.confirmPassword) throw new Error('Passwords do not match.')
+          await register(values)
+          onRegistered()
         }}
       />
     </main>

@@ -65,3 +65,15 @@ class ImportStatus(StrEnum):
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+# Stable public inventory emitted by the production detector pipeline.
+SUPPORTED_PATTERN_TYPES = (
+    "BASE-VCP", "BASE-FLAT", "BASE-52WH", "BASE-TIGHT",
+    "BRK-RANGE", "BRK-52WH", "BRK-ATH", "BRK-MULTIY",
+    "PB-BRKRET", "PB-EMA20", "PB-SMA50",
+    "TREND-HHHL", "TREND-S2", "TREND-MA",
+    "COMP-NR7", "COMP-IB", "COMP-ATR", "COMP-RANGE",
+    "MOM-ACC", "MOM-RSL", "MOM-RSB", "VOL-DRY", "VOL-EXP",
+    "FAIL-BRK", "FAIL-BASE", "FAIL-EMA20", "FAIL-SMA50", "FAIL-STRUCT",
+)

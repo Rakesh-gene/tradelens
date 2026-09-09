@@ -1096,6 +1096,8 @@ production build.
 
 ### Client Phase 0 — Contract fixtures and foundation
 
+**Status: Complete — 2026-09-09.**
+
 1. Freeze common error, freshness, setup summary, pattern detail, event,
    fingerprint, and chart response examples with the backend.
 2. Add `apiClient.js`, API modules, session helpers, route parser, query helper,
@@ -1110,6 +1112,8 @@ still work; API errors have one representation.
 
 ### Client Phase 1 — Real overview vertical slice
 
+**Status: Complete — 2026-09-09.**
+
 1. Implement `GET /api/overview` on the server.
 2. Replace overview placeholders with freshness, pipeline, market regime,
    breadth, lifecycle counts, and top setups.
@@ -1123,6 +1127,8 @@ processed and which opportunities rank highest.
 
 ### Client Phase 2 — Screener and filters
 
+**Status: Complete — 2026-09-09.**
+
 1. Implement `GET /api/setups` with server pagination, sorting, and facets.
 2. Build `SetupsPage`, desktop table, mobile cards, filters, and cursor controls.
 3. Make filter and sort state reproducible from the URL.
@@ -1132,6 +1138,8 @@ processed and which opportunities rank highest.
 relative strength, liquidity, and market date without loading the universe.
 
 ### Client Phase 3 — Pattern evidence
+
+**Status: Complete — 2026-09-09.**
 
 1. Implement `GET /api/patterns/{id}` and `/events`.
 2. Build pattern header, measurement groups, score breakdown, supporting
@@ -1144,6 +1152,8 @@ levels, supporting evidence, versions, and lifecycle transitions.
 
 ### Client Phase 4 — Security fingerprint and search
 
+**Status: Complete — 2026-09-09.**
+
 1. Implement `GET /api/securities` search and fingerprint endpoint.
 2. Add accessible debounced search to `AppShell`.
 3. Build the complete technical fingerprint page.
@@ -1153,6 +1163,9 @@ levels, supporting evidence, versions, and lifecycle transitions.
 technical classification.
 
 ### Client Phase 5 — Adjusted chart integration
+
+**Status: Complete — 2026-09-09.** The existing `lightweight-charts`
+decision is retained instead of introducing a second SVG chart renderer.
 
 1. Implement the chart-series endpoint with bounded/downsampled adjusted data.
 2. Build accessible SVG price/volume chart and summary table.
@@ -1164,6 +1177,10 @@ usable with keyboard, mobile, and reduced-motion settings.
 
 ### Client Phase 6 — Research
 
+**Status: Complete — 2026-09-09.** The client polls non-terminal runs and
+renders baseline comparison only when the server supplies one; it never
+fabricates an unfiltered baseline or exposes cancellation when unsupported.
+
 1. Freeze asynchronous research run contracts.
 2. Build filter builder, job status, cancellation if supported, result summary,
    and baseline comparison.
@@ -1174,6 +1191,8 @@ usable with keyboard, mobile, and reduced-motion settings.
 outcomes from the current setup score.
 
 ### Client Phase 7 — Hardening
+
+**Status: Complete — 2026-09-09.**
 
 1. Complete accessibility and browser checks.
 2. Measure request count, render cost, chart behavior, and production bundle.
