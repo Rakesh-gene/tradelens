@@ -48,6 +48,7 @@ class NseApiClient:
     EQUITY_HISTORY_URL = f"{API_URL}/NextApi/apiClient/GetQuoteApi"
     CORPORATE_ACTIONS_URL = f"{API_URL}/corporates-corporateActions"
     INDEX_HISTORY_URL = f"{API_URL}/historical/indicesHistory"
+    INDEX_HISTORY_FALLBACK_URL = "https://niftyindices.com/BackPage/getHistoricaldatatabletoString"
     EOD_REPORT_URL_TEMPLATE = (
         "https://nsearchives.nseindia.com/content/cm/"
         "BhavCopy_NSE_CM_0_0_0_{date}_F_0000.csv.zip"
@@ -186,18 +187,63 @@ class NseApiClient:
         if not normalized_index:
             raise ValueError("index_name is required")
         records: list[NseIndexHistoryRecord] = []
+        use_fallback = False
         for chunk_from, chunk_to in self._date_chunks(from_date, to_date):
-            payload = self._request_json(
-                self.INDEX_HISTORY_URL,
-                {
-                    "indexType": normalized_index,
-                    "from": self._format_date(chunk_from),
-                    "to": self._format_date(chunk_to),
-                },
-            )
+            if use_fallback:
+                payload = self._request_index_history_fallback(
+                    normalized_index, chunk_from, chunk_to
+                )
+            else:
+                try:
+                    payload = self._request_json(
+                        self.INDEX_HISTORY_URL,
+                        {
+                            "indexType": normalized_index,
+                            "from": self._format_date(chunk_from),
+                            "to": self._format_date(chunk_to),
+                        },
+                    )
+                    nested = payload.get("data") if isinstance(payload, Mapping) else None
+                    if isinstance(nested, Mapping):
+                        payload = nested.get("indexCloseOnlineRecords", [])
+                except NseRequestError:
+                    # NSE's public historical route intermittently returns 503.
+                    # NSE Indices publishes the same official OHLC series.
+                    use_fallback = True
+                    payload = self._request_index_history_fallback(
+                        normalized_index, chunk_from, chunk_to
+                    )
             records.extend(parse_index_history_response(payload, normalized_index))
         unique = {(record.trading_date, record.index_name): record for record in records}
         return [unique[key] for key in sorted(unique)]
+
+    def _request_index_history_fallback(
+        self, index_name: str, from_date: date, to_date: date
+    ) -> object:
+        cinfo = (
+            "{'name': '" + index_name + "', 'startDate': '"
+            + from_date.strftime("%d-%b-%Y") + "', 'endDate': '"
+            + to_date.strftime("%d-%b-%Y") + "', 'indexName': '"
+            + index_name + "'}"
+        )
+        body, content_type = self._request_bytes(
+            self.INDEX_HISTORY_FALLBACK_URL,
+            "application/json, text/plain;q=0.9, */*;q=0.8",
+            data=json.dumps({"cinfo": cinfo}).encode("utf-8"),
+            extra_headers={
+                "Content-Type": "application/json; charset=UTF-8",
+                "Origin": "https://niftyindices.com",
+                "Referer": "https://niftyindices.com/reports",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        # NSE Indices currently labels its JSON array as text/html. Validate
+        # the body itself here while still rejecting a genuine block page.
+        self._reject_empty_or_html_body(body, "NSE Indices JSON response")
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise NseResponseError("INVALID_JSON", "NSE Indices returned malformed JSON") from exc
 
     def download_eod_report(self, trading_date: date) -> bytes:
         """Download the NSE bulk EOD report when the archive has published it."""
@@ -235,12 +281,17 @@ class NseApiClient:
         self._validate_file_response(body, content_type, description)
         return body
 
-    def _request_bytes(self, url: str, accept: str) -> tuple[bytes, str | None]:
+    def _request_bytes(
+        self, url: str, accept: str, *, data: bytes | None = None,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> tuple[bytes, str | None]:
         last_error: NseRequestError | None = None
         for attempt in range(self._max_retries + 1):
             self._increment_metric("requestAttempts")
             try:
-                response = self._open_once(url, accept)
+                response = self._open_once(
+                    url, accept, data=data, extra_headers=extra_headers
+                )
                 self._record_transport_success()
                 self._increment_metric("successfulRequests")
                 return response
@@ -263,14 +314,19 @@ class NseApiClient:
                 self._backoff(attempt)
         raise last_error or NseRequestError("UNKNOWN", "NSE request failed")
 
-    def _open_once(self, url: str, accept: str) -> tuple[bytes, str | None]:
+    def _open_once(
+        self, url: str, accept: str, *, data: bytes | None = None,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> tuple[bytes, str | None]:
         self._wait_for_circuit()
         # Only serialize reservation of a rate-limit slot. Holding this lock
         # while waiting for the response lets one slow NSE call stall every
         # equity worker and defeats bounded HTTP concurrency.
         with self._request_slot_lock:
             self._wait_for_request_slot()
-        request = Request(url, headers=self._headers(accept))
+        headers = self._headers(accept)
+        headers.update(extra_headers or {})
+        request = Request(url, headers=headers, data=data)
         with self._opener_for_thread().open(request, timeout=self._timeout_seconds) as response:
             status_code = getattr(response, "status", 200)
             if status_code >= 400:
@@ -382,6 +438,14 @@ class NseApiClient:
         if not stripped:
             raise NseResponseError("EMPTY_RESPONSE", f"NSE returned an empty {description}")
         if (content_type and "html" in content_type) or stripped.startswith(b"<!doctype html") or stripped.startswith(b"<html"):
+            raise NseResponseError("HTML_BLOCK_PAGE", f"NSE returned an HTML page instead of {description}")
+
+    @staticmethod
+    def _reject_empty_or_html_body(body: bytes, description: str) -> None:
+        stripped = body.lstrip().lower()
+        if not stripped:
+            raise NseResponseError("EMPTY_RESPONSE", f"NSE returned an empty {description}")
+        if stripped.startswith((b"<!doctype html", b"<html")):
             raise NseResponseError("HTML_BLOCK_PAGE", f"NSE returned an HTML page instead of {description}")
 
     @staticmethod

@@ -169,6 +169,21 @@ class PostgresMarketDataRepositoryTestCase(unittest.TestCase):
         self.assertIsNone(parameters[0]["deliverable_quantity"])
         self.assertEqual(self.connection.commit_count, 1)
 
+    def test_upsert_index_bars_seeds_index_and_uses_natural_key(self) -> None:
+        count = self.repository.upsert_index_bars("NIFTY 500", [{
+            "trading_date": date(2026, 9, 4),
+            "open_price": Decimal("100"), "high_price": Decimal("105"),
+            "low_price": Decimal("99"), "close_price": Decimal("104"),
+            "volume": None, "source_name": "NSE", "source_checksum": "index-1",
+        }])
+
+        self.assertEqual(1, count)
+        self.assertIn("ON CONFLICT (code) DO UPDATE", self.cursor.executed[0][0])
+        statement, parameters = self.cursor.executed_many[0]
+        self.assertIn("ON CONFLICT (index_code, trading_date) DO UPDATE", statement)
+        self.assertEqual("NIFTY 500", parameters[0]["index_code"])
+        self.assertEqual(1, self.connection.commit_count)
+
     def test_pattern_scan_metrics_and_failures_are_parameterized(self) -> None:
         self.repository.update_pattern_scan_metrics("run-1", {"patternsCreated": 2})
         self.repository.record_pattern_scan_failure({

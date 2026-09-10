@@ -64,6 +64,7 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         payload = browser_payload(self.service.setups({"pageSize": ["10"]}))
 
         self.assertEqual("best-fit-v1", payload["ranking"]["methodologyVersion"])
+        self.assertEqual("decision-intelligence-v1", payload["ranking"]["decisionMethodologyVersion"])
         self.assertEqual("lifecycleState", payload["ranking"]["peerGroup"])
         self.assertFalse(payload["ranking"]["historicalOutcomesIncluded"])
         self.assertEqual(1, len(payload["items"]))
@@ -72,6 +73,13 @@ class PatternQueryServiceTestCase(unittest.TestCase):
             self.assertEqual(100.0, item["bestFit"]["percentileWithinState"])
             self.assertEqual("LEADING", item["bestFit"]["tier"])
             self.assertIsNone(item["bestFit"]["historicalProbability"])
+            expected_action = {
+                "READY": "WAIT_FOR_BREAKOUT",
+                "TRIGGERED": "WAIT_FOR_CONFIRMATION",
+                "CONFIRMED": "ENTRY_CONFIRMED",
+            }[item["state"]]
+            self.assertEqual(expected_action, item["decision"]["action"])
+            self.assertIn("three-contraction VCP", item["decision"]["headline"])
 
     def test_pattern_type_facets_include_the_complete_supported_inventory(self):
         payload = self.service.setups({"pageSize": ["10"]})
@@ -106,6 +114,26 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertEqual("READY", fingerprint["primarySetup"]["maturityBand"])
         self.assertEqual(Decimal("91"), fingerprint["relativeStrength"]["sixMonth"])
         self.assertEqual(2, len(detail["allEvidence"]))
+        self.assertEqual("WAIT_FOR_BREAKOUT", detail["decision"]["action"])
+        self.assertEqual(Decimal("12.00"), detail["decision"]["levels"]["riskFromTriggerPct"])
+
+    def test_fingerprint_uses_best_scored_non_failure_signal_when_no_primary_setup_exists(self):
+        trend = _pattern("trend-1", "DETECTED", "64")
+        trend.update(pattern_class="TREND", pattern_type="TREND-MA", maturity_score=None)
+        repository = InMemoryPatternQueryRepository(
+            patterns=[trend],
+            securities=[{"isin": "INE000000001", "symbol": "EXAMPLE", "company_name": "Example Ltd"}],
+            features=[{"isin": "INE000000001", "trading_date": _DATE}],
+        )
+
+        fingerprint = PatternQueryService(repository).fingerprint(
+            "INE000000001", {"asOf": [_DATE.isoformat()]}
+        )
+
+        self.assertIsNone(fingerprint["primarySetup"])
+        self.assertEqual("TREND-MA", fingerprint["scoreSource"]["patternType"])
+        self.assertEqual(Decimal("64"), fingerprint["scores"]["setup"])
+        self.assertIsNone(fingerprint["scores"]["maturity"])
 
     def test_chart_returns_bounded_candles_and_key_trade_levels(self):
         chart = self.service.chart("p1", {"range": ["3m"]})
@@ -161,6 +189,16 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
         self.assertIn("feature.trading_date = bars.trading_date", statement)
         self.assertIn("features.ema_20", statement)
         self.assertEqual(("INE000000001", "av1", _DATE - timedelta(days=30), _DATE), repository.parameters[-1])
+
+    def test_latest_feature_calculates_missing_cross_sectional_rs_percentile(self):
+        repository = CapturingPatternQueryRepository()
+
+        repository.get_latest_feature("INE000000001", _DATE)
+
+        statement = repository.statements[-1]
+        self.assertIn("DENSE_RANK() OVER", statement)
+        self.assertIn("computed_percentile", statement)
+        self.assertIn("COALESCE(features.relative_strength_percentile", statement)
 
     def test_overview_reads_only_the_selected_feature_session(self):
         repository = CapturingPatternQueryRepository()

@@ -9,6 +9,8 @@ from auth.jwt import decode_access_token, issue_access_token
 from auth.models import AuthenticationResult, RegistrationResult
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+DEFAULT_THEME = "ember"
+SUPPORTED_THEMES = ("ember", "forest", "ocean", "plum", "slate")
 
 
 class UserRepository(Protocol):
@@ -16,6 +18,9 @@ class UserRepository(Protocol):
         ...
 
     def create_user(self, email: str, password_hash: str) -> dict[str, object]:
+        ...
+
+    def update_theme_preference(self, user_id: str, theme: str) -> dict[str, object] | None:
         ...
 
 
@@ -47,6 +52,7 @@ class AuthService:
             user_id=user["id"],
             email=user["email"],
             is_admin=bool(user.get("is_admin", False)),
+            theme=str(user.get("theme_preference") or DEFAULT_THEME),
         )
 
     def current_user(self, access_token: str) -> dict[str, object]:
@@ -54,7 +60,25 @@ class AuthService:
         user = self._user_repository.get_by_email(str(claims["email"]))
         if user is None or str(user["id"]) != str(claims["sub"]):
             raise ValueError("Invalid or expired access token")
-        return {"id": user["id"], "email": user["email"], "is_admin": bool(user.get("is_admin", False))}
+        return {
+            "id": user["id"], "email": user["email"],
+            "is_admin": bool(user.get("is_admin", False)),
+            "theme": str(user.get("theme_preference") or DEFAULT_THEME),
+        }
+
+    def update_theme(self, access_token: str, theme: object) -> dict[str, object]:
+        user = self.current_user(access_token)
+        normalized_theme = str(theme or "").strip().lower()
+        if normalized_theme not in SUPPORTED_THEMES:
+            raise ValueError("Theme must be one of: " + ", ".join(SUPPORTED_THEMES))
+        updated = self._user_repository.update_theme_preference(str(user["id"]), normalized_theme)
+        if updated is None:
+            raise ValueError("User profile was not found")
+        return {
+            "id": updated["id"], "email": updated["email"],
+            "is_admin": bool(updated.get("is_admin", False)),
+            "theme": str(updated.get("theme_preference") or DEFAULT_THEME),
+        }
 
     def renew_access_token(self, access_token: str) -> tuple[dict[str, object], str]:
         """Validate the current session and issue a fresh sliding access token."""

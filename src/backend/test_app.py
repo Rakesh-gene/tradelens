@@ -141,6 +141,41 @@ class ApiTestCase(unittest.TestCase):
         ))
         self.assertEqual(12 * 60 * 60, claims["exp"] - claims["iat"])
 
+    def test_authenticated_user_can_update_theme_preference(self) -> None:
+        self.repository.create_user(
+            "theme@example.com",
+            "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+        )
+        login = Request(
+            f"{self.base_url}/api/login", method="POST",
+            data=json.dumps({"email": "theme@example.com", "password": "password123"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(login) as response:
+            token = json.load(response)["accessToken"]
+        update = Request(
+            f"{self.base_url}/api/profile", method="PATCH",
+            data=json.dumps({"theme": "ocean"}).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urlopen(update) as response:
+            self.assertEqual("ocean", json.load(response)["user"]["theme"])
+        current = Request(
+            f"{self.base_url}/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(current) as response:
+            self.assertEqual("ocean", json.load(response)["user"]["theme"])
+
+        invalid = Request(
+            f"{self.base_url}/api/profile", method="PATCH",
+            data=json.dumps({"theme": "black"}).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(invalid)
+        self.assertEqual(400, context.exception.code)
+
     def test_unknown_endpoint_returns_404(self) -> None:
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/missing")

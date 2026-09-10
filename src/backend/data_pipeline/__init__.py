@@ -4,6 +4,7 @@ from .nse_data_collector import NseDataCollector
 from .history_backfill import BackfillRequest, BackfillRunResult, HistoryBackfillService
 from .daily_delta import DailyDeltaRequest, DailyDeltaRunResult, DailyDeltaService
 from .adjustments import AdjustmentRequest, AdjustmentResult, AdjustmentService
+from .benchmark_history import BenchmarkHistoryService
 from .nse_api import NseApiClient, NseRequestError, NseResponseError
 from .normalization import (
     NseDataValidationError,
@@ -26,6 +27,7 @@ __all__ = [
     "AdjustmentRequest",
     "AdjustmentResult",
     "AdjustmentService",
+    "BenchmarkHistoryService",
     "NseDataValidationError",
     "NseRequestError",
     "NseResponseError",

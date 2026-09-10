@@ -18,6 +18,8 @@ describe('SecuritySearch', () => {
     const input = screen.getByRole('combobox')
     await userEvent.type(input, 'rel')
     await waitFor(() => expect(searchSecurities).toHaveBeenCalledOnce(), { timeout: 1000 })
+    expect(screen.queryByText('INE002A01018')).toBeNull()
+    expect(screen.queryByText('INE036A01016')).toBeNull()
     await userEvent.keyboard('{ArrowDown}{Enter}')
     expect(navigate).toHaveBeenCalledWith('/securities/INE036A01016')
   })

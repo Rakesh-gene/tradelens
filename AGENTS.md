@@ -205,6 +205,16 @@ External exchange behavior is isolated in `data_pipeline/`.
 - Best-fit and setup scores are ranking evidence, never probability of profit.
   Historical probability remains null until completed point-in-time backtests
   provide the configured minimum sample size.
+- `pattern_engine/decision_intelligence.py` owns the user-facing operating
+  conclusion derived from lifecycle state, scores, context, liquidity,
+  relative strength, price levels, and evidence availability. React must render
+  this contract rather than recreate decision rules or infer them from scores.
+- Decision confidence means evidence alignment and completeness, not win
+  probability. Missing inputs must be named and reduce confidence; never turn
+  missing evidence into a fabricated zero or a positive confirmation.
+- A pattern decision does not imply portfolio ownership. `CONFIRMED` may return
+  entry confirmation and `HOLD_WHILE_VALID`, but only a position-aware trading
+  service may claim that the user currently holds a security.
 - Full-universe reruns are incremental unless an administrator explicitly
   requests a force refresh: plan price requests from each security's stored
   maximum session, retain the configured historical floor as calculation

@@ -7,12 +7,14 @@ import { getCurrentUser } from './api/authApi.js'
 import { clearAccessToken, readAccessToken, writeAccessToken } from './auth/authSession.js'
 import { isProtectedRoute, matchRoute } from './routing/routes.js'
 import { rememberCurrentSetupsLocation, rememberedSetupsLocation } from './setupNavigation.js'
+import { applyTheme, readTheme } from './themePreferences.js'
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'))
 const SetupsPage = lazy(() => import('./pages/SetupsPage.jsx'))
 const PatternDetailPage = lazy(() => import('./pages/PatternDetailPage.jsx'))
 const SecurityPage = lazy(() => import('./pages/SecurityPage.jsx'))
 const AdminPipelinePage = lazy(() => import('./pages/AdminPipelinePage.jsx'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'))
 
 function currentLocation() {
   return `${window.location.pathname}${window.location.search}`
@@ -25,7 +27,10 @@ export default function App() {
   const [sessionError, setSessionError] = useState('')
   const [sessionRevision, setSessionRevision] = useState(0)
   const [authNotice, setAuthNotice] = useState('')
+  const [theme, setTheme] = useState(readTheme)
   const route = matchRoute(window.location.pathname)
+
+  useEffect(() => { applyTheme(theme) }, [theme])
 
   const navigate = (next, { replace = false } = {}) => {
     rememberCurrentSetupsLocation()
@@ -63,6 +68,7 @@ export default function App() {
         .then((payload) => {
           if (payload.accessToken) writeAccessToken(payload.accessToken)
           setUser(payload.user)
+          if (payload.user?.theme) setTheme(payload.user.theme)
           setSessionError('')
           if (route.admin && !payload.user?.isAdmin && !payload.user?.is_admin) {
             navigate('/overview', { replace: true })
@@ -98,6 +104,7 @@ export default function App() {
   const authenticated = (token, nextUser) => {
     writeAccessToken(token)
     setUser(nextUser)
+    if (nextUser?.theme) setTheme(nextUser.theme)
     setAuthNotice('')
     navigate('/overview', { replace: true })
   }
@@ -114,7 +121,7 @@ export default function App() {
 
   if (route.name === 'signup') return <SignupPage onRegistered={registered} />
   if (route.name === 'login') return <LoginPage notice={authNotice} onAuthenticated={authenticated} />
-  if (!isProtectedRoute(route)) return <NotFoundPage onNavigate={navigate} />
+  if (!isProtectedRoute(route)) return <NotFoundPage onNavigate={navigate} withFooter />
   if (checkingSession) return <main className="session-loading">Validating your session…</main>
   if (sessionError) {
     return <main className="standalone-state">
@@ -131,6 +138,7 @@ export default function App() {
   else if (route.name === 'setups') page = <SetupsPage key={location} {...common} />
   else if (route.name === 'pattern-detail') page = <PatternDetailPage patternId={route.params.patternId} {...common} />
   else if (route.name === 'security') page = <SecurityPage isin={route.params.isin} {...common} />
+  else if (route.name === 'profile') page = <ProfilePage {...common} user={user} theme={theme} onThemeChange={setTheme} onProfileUpdated={setUser} />
   else if (route.name === 'admin-pipeline' && (user?.isAdmin || user?.is_admin)) page = <AdminPipelinePage {...common} />
 
   return <AppShell user={user} onNavigate={navigate} onSignOut={signOut}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>

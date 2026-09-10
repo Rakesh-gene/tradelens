@@ -15,3 +15,4 @@ class AuthenticationResult:
     user_id: str
     email: str
     is_admin: bool
+    theme: str

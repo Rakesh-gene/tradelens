@@ -50,6 +50,8 @@ class AdminPipelineService:
         today: Callable[[], date] = date.today,
         logger=None,
         max_workers: int = 3,
+        benchmark_history=None,
+        equity_collector=None,
     ) -> None:
         if not 1 <= max_workers <= 8:
             raise ValueError("max_workers must be between 1 and 8")
@@ -61,6 +63,8 @@ class AdminPipelineService:
         self._today = today
         self._logger = logger
         self._max_workers = max_workers
+        self._benchmark_history = benchmark_history
+        self._equity_collector = equity_collector
 
     def list_equities(self, query: Mapping[str, list[str]]) -> dict[str, object]:
         page = _bounded_integer(_one(query, "page"), 1, 1, 100_000, "page")
@@ -181,6 +185,10 @@ class AdminPipelineService:
             return "ALREADY_SCHEDULED"
         if self._repository.active_pipeline_run_exists():
             return "ACTIVE_RUN"
+        # Refresh before start() snapshots the all-equities universe. This makes
+        # a newly listed EQ security part of the same evening's scheduled run.
+        if self._equity_collector is not None:
+            self._equity_collector.download_equities(initiated_by="scheduler")
         self.start(
             {"allEquities": True, "batchSize": batch_size, "forceRefresh": False,
              "toDate": scheduled_for.isoformat()},
@@ -250,6 +258,16 @@ class AdminPipelineService:
         if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
             return
         self._repository.update_pipeline_run(run_id, "RUNNING", started=True)
+        if self._benchmark_history is not None:
+            try:
+                self._benchmark_history.ensure_history(from_date, to_date)
+            except Exception as error:
+                message = f"Benchmark import failed: {str(error).replace(chr(10), ' ')[:900]}"
+                self._repository.update_pipeline_run(
+                    run_id, "FAILED", securities_completed=completed,
+                    securities_failed=failed, error_summary=message, finished=True,
+                )
+                return
         with ThreadPoolExecutor(
             max_workers=self._max_workers, thread_name_prefix="admin-pipeline-equity"
         ) as pool:
@@ -306,6 +324,7 @@ class AdminPipelineService:
         self._repository.update_pipeline_item(
             run_id, isin, "RUNNING", "SOURCE_IMPORT", started=True
         )
+        rebuilt = None
         try:
             imported = self._history.run(BackfillRequest(
                 from_date=from_date, to_date=to_date, isin=isin,
@@ -325,7 +344,16 @@ class AdminPipelineService:
                 isin, from_date, to_date, versions, dry_run=False
             )
             if rebuilt.get("status") != "COMPLETED":
-                raise RuntimeError(f"Pattern scan finished with {rebuilt.get('status')}")
+                reasons = [
+                    str(failure.get("reason") or "").strip()
+                    for failure in (rebuilt.get("failures") or ())
+                    if str(failure.get("reason") or "").strip()
+                ]
+                detail = "; ".join(reasons[:3])
+                raise RuntimeError(
+                    f"Pattern scan failed: {detail}"
+                    if detail else f"Pattern scan finished with {rebuilt.get('status')}"
+                )
             self._repository.update_pipeline_item(
                 run_id, isin, "COMPLETED", "COMPLETED",
                 history_run_id=imported.run_id, pattern_run_id=rebuilt.get("runId"),
@@ -339,7 +367,9 @@ class AdminPipelineService:
         except Exception as error:  # one equity must not abort its batch
             message = str(error).replace("\n", " ")[:1000]
             self._repository.update_pipeline_item(
-                run_id, isin, "FAILED", "FAILED", error_message=message, finished=True
+                run_id, isin, "FAILED", "FAILED",
+                pattern_run_id=rebuilt.get("runId") if rebuilt else None,
+                error_message=message, finished=True,
             )
             return False, symbol, message
 

@@ -86,6 +86,20 @@ class OpenerFactoryTracker:
         return opener
 
 
+class IndexFallbackOpener:
+    def __init__(self):
+        self.requests = []
+
+    def open(self, request, timeout):
+        self.requests.append(request)
+        if "nseindia.com" in request.full_url:
+            raise HTTPError(request.full_url, 503, "unavailable", {}, None)
+        return FakeResponse(json.dumps([{
+            "INDEX_NAME": "NIFTY 500", "HistoricalDate": "04-Sep-2026",
+            "OPEN": "100", "HIGH": "105", "LOW": "99", "CLOSE": "104",
+        }]).encode())
+
+
 class PerThreadOpener:
     def __init__(self, tracker: OpenerFactoryTracker) -> None:
         self._tracker = tracker
@@ -109,6 +123,23 @@ def _fixture(name: str) -> bytes:
 
 
 class NseApiClientTestCase(unittest.TestCase):
+    def test_index_history_falls_back_to_official_nse_indices_source(self) -> None:
+        opener = IndexFallbackOpener()
+        client = NseApiClient(
+            opener=opener, max_retries=0,
+            max_requests_per_second=1000, sleeper=lambda _: None,
+        )
+
+        records = client.fetch_index_history(
+            "NIFTY 500", date(2026, 9, 1), date(2026, 9, 4)
+        )
+
+        self.assertEqual(1, len(records))
+        self.assertEqual(Decimal("104"), records[0].close_price)
+        fallback = opener.requests[-1]
+        self.assertEqual("POST", fallback.get_method())
+        self.assertIn(b"NIFTY 500", fallback.data)
+
     def test_each_worker_thread_uses_an_independent_http_session(self) -> None:
         tracker = OpenerFactoryTracker()
         client = NseApiClient(

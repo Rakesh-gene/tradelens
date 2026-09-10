@@ -60,6 +60,14 @@ class MarketDataRepository(Protocol):
     def upsert_technical_features(self, features: Sequence[Mapping[str, object]]) -> int:
         ...
 
+    def get_index_bar_date_range(self, index_code: str) -> tuple[date | None, date | None]:
+        ...
+
+    def upsert_index_bars(
+        self, index_code: str, bars: Sequence[Mapping[str, object]]
+    ) -> int:
+        ...
+
     def load_swing_points(
         self, isin: str, from_date: date, to_date: date, feature_version: str, *, as_of: date | None = None
     ) -> list[dict[str, object]]:
@@ -332,6 +340,55 @@ class PostgresMarketDataRepository:
                 cursor.executemany(statement, parameters)
             connection.commit()
         return len(features)
+
+    def get_index_bar_date_range(self, index_code: str) -> tuple[date | None, date | None]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT MIN(trading_date), MAX(trading_date) FROM index_daily_bars WHERE index_code = %s",
+                    (index_code,),
+                )
+                row = cursor.fetchone()
+        return (row[0], row[1]) if row is not None else (None, None)
+
+    def upsert_index_bars(
+        self, index_code: str, bars: Sequence[Mapping[str, object]]
+    ) -> int:
+        if not bars:
+            return 0
+        index_statement = """
+            INSERT INTO market_indices (code, name, provider)
+            VALUES (%s, %s, 'NSE')
+            ON CONFLICT (code) DO UPDATE SET
+                name = EXCLUDED.name, provider = EXCLUDED.provider, updated_at = NOW()
+        """
+        bar_statement = """
+            INSERT INTO index_daily_bars (
+                index_code, trading_date, open_price, high_price, low_price,
+                close_price, volume, source_name, source_checksum
+            ) VALUES (
+                %(index_code)s, %(trading_date)s, %(open_price)s, %(high_price)s,
+                %(low_price)s, %(close_price)s, %(volume)s, %(source_name)s,
+                %(source_checksum)s
+            )
+            ON CONFLICT (index_code, trading_date) DO UPDATE SET
+                open_price = EXCLUDED.open_price,
+                high_price = EXCLUDED.high_price,
+                low_price = EXCLUDED.low_price,
+                close_price = EXCLUDED.close_price,
+                volume = EXCLUDED.volume,
+                source_name = EXCLUDED.source_name,
+                source_checksum = EXCLUDED.source_checksum,
+                imported_at = NOW()
+            WHERE index_daily_bars.source_checksum IS DISTINCT FROM EXCLUDED.source_checksum
+        """
+        parameters = [{**dict(bar), "index_code": index_code} for bar in bars]
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(index_statement, (index_code, index_code))
+                cursor.executemany(bar_statement, parameters)
+            connection.commit()
+        return len(parameters)
 
     def load_swing_points(
         self, isin: str, from_date: date, to_date: date, feature_version: str, *, as_of: date | None = None

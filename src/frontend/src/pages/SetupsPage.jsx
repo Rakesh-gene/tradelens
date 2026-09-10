@@ -34,10 +34,10 @@ export default function SetupsPage({ onNavigate, onUnauthorized }) {
   }
 
   return <>
-    <PageIntro eyebrow="Opportunity intelligence" title="Find the best fit within every lifecycle stage." description="Compare active setups against peers in the same stage, then inspect the evidence behind the rank." date={resource.data?.dataAsOf || parsed.filters.asOf} />
+    <PageIntro title="Setups" date={resource.data?.dataAsOf || parsed.filters.asOf} />
     {parsed.corrected.length > 0 && <p className="status-banner" role="status">Unsupported {parsed.corrected.join(', ')} filters were removed.</p>}
     {compact ? <><button className="secondary-button filter-open" type="button" onClick={() => setDrawerOpen(true)}>Filters and sorting</button><PatternFilters drawer open={drawerOpen} filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} onClose={() => setDrawerOpen(false)} /></> : <PatternFilters filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} />}
-    <p className="ranking-note">Best fit combines setup evidence, context, and liquidity, then ranks each security against peers in the same lifecycle state. It is not historical probability.</p>
+    <p className="ranking-note">Scores rank setups within the same lifecycle state; they do not predict returns.</p>
     <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
       {resource.data && <>
         <p className="result-status" aria-live="polite">{resource.data.items.length} securities on this page · sorted {parsed.filters.direction === 'desc' ? 'highest' : 'lowest'} first by {parsed.filters.sort}</p>

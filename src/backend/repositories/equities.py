@@ -13,11 +13,12 @@ from repositories.migrations import MigrationRunner
 class PostgresEquityRepository:
     """PostgreSQL persistence for the NSE equity master list."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, apply_migrations: bool = True) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg is required for PostgreSQL support")
         self._dsn = dsn
-        self._apply_migrations()
+        if apply_migrations:
+            self._apply_migrations()
 
     def _connect(self):
         return psycopg.connect(self._dsn)

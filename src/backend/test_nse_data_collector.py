@@ -46,6 +46,16 @@ class NseDataCollectorTestCase(unittest.TestCase):
         self.assertEqual(1, runs.updated[-1][2]["rows_downloaded"])
         self.assertIn("duration_ms", runs.updated[-1][2])
 
+    def test_scheduled_import_records_scheduler_as_initiator(self) -> None:
+        runs = RecordingRunRepository()
+        collector = NseDataCollector(
+            RecordingEquityRepository(), FakeNseClient(), run_repository=runs
+        )
+
+        collector.download_equities(initiated_by="scheduler")
+
+        self.assertEqual("scheduler", runs.created[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()

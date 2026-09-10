@@ -101,10 +101,19 @@ class LifecycleTestCase(unittest.TestCase):
         )
         self.assertEqual(2, third.instance["state_version"])
 
-    def test_backward_transition_is_rejected_and_terminal_history_is_retained(self):
+    def test_weaker_daily_evidence_retains_forward_state_and_terminal_history(self):
         self._apply(_candidate(PatternState.READY))
-        with self.assertRaisesRegex(ValueError, "Backward lifecycle transition"):
-            self._apply(_candidate(PatternState.FORMING, detected=date(2026, 9, 2)))
+        retained = self._apply(
+            _candidate(
+                PatternState.FORMING, detected=date(2026, 9, 2),
+                quality=_D("62"), maturity=_D("54"),
+            )
+        )
+
+        self.assertEqual(PatternState.READY.value, retained.instance["state"])
+        self.assertEqual(_D("62"), retained.instance["quality_score"])
+        self.assertEqual("FORMING", retained.instance["measurements"]["observed_state"])
+        self.assertEqual("READY", retained.instance["measurements"]["lifecycle_state_retained"])
 
         terminal = self._apply(
             _candidate(PatternState.INVALIDATED, detected=date(2026, 9, 2))
@@ -113,8 +122,32 @@ class LifecycleTestCase(unittest.TestCase):
         self.assertEqual(date(2026, 9, 2), terminal.instance["terminal_date"])
         self.assertEqual(
             [PatternEventType.PATTERN_DETECTED.value, PatternEventType.INVALIDATED.value],
-            [event["event_type"] for event in self.repository.load_events(terminal.instance["id"])],
+            [
+                event["event_type"]
+                for event in self.repository.load_events(terminal.instance["id"])
+                if event["event_type"] in {
+                    PatternEventType.PATTERN_DETECTED.value,
+                    PatternEventType.INVALIDATED.value,
+                }
+            ],
         )
+
+    def test_exact_deduplication_key_wins_over_newer_approximate_match(self):
+        exact = self._apply(_candidate(detected=date(2026, 9, 1)))
+        exact_key = exact.instance["active_deduplication_key"]
+        self.repository.instances["newer-approximate"] = {
+            **exact.instance,
+            "id": "newer-approximate",
+            "start_date": date(2026, 8, 2),
+            "last_updated_date": date(2026, 9, 3),
+            "pivot_price": _D("121"),
+            "active_deduplication_key": "different-key",
+        }
+
+        result = self._apply(_candidate(PatternState.READY, detected=date(2026, 9, 4)))
+
+        self.assertEqual(exact_key, result.instance["active_deduplication_key"])
+        self.assertEqual(exact.instance["id"], result.instance["id"])
 
     def test_score_and_pivot_changes_emit_one_reconstructable_event(self):
         first = self._apply(_candidate())

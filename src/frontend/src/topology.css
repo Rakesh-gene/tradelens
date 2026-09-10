@@ -197,3 +197,54 @@
   --font-smoothing-webkit: antialiased;
   --font-smoothing-moz: grayscale;
 }
+
+/* User-selectable atmospheres. All five retain low glare and avoid pure black or white. */
+:root[data-theme="ember"] {
+  --color-text-primary: #f6ecd6; --color-text-strong: #fff8ea; --color-text-on-accent: #29180d;
+  --color-text-muted: rgb(246 236 214 / .7); --color-text-subtle: rgb(246 236 214 / .58); --color-text-label: rgb(246 236 214 / .84);
+  --color-accent: #ffdf84; --color-accent-soft: rgb(255 223 132 / .12); --color-accent-focus: rgb(255 221 120 / .8);
+  --color-surface-panel: rgb(31 20 15 / .9); --color-surface-card: rgb(32 25 19 / .66); --color-surface-control: rgb(255 241 215 / .055); --color-surface-secondary: rgb(255 236 199 / .075); --color-surface-secondary-quiet: rgb(255 236 199 / .035);
+  --color-border-subtle: rgb(255 225 174 / .11); --color-border-default: rgb(255 225 174 / .15);
+  --gradient-page: radial-gradient(circle at 10% 12%, rgb(255 214 103 / .2), transparent 22rem), radial-gradient(circle at 88% 18%, rgb(242 141 63 / .14), transparent 18rem), linear-gradient(145deg, #17140f, #24170f 52%, #312016);
+  --gradient-accent: linear-gradient(155deg, #ffdf84, #f28d3f); --gradient-panel: linear-gradient(145deg, rgb(255 216 138 / .13), rgb(42 27 19 / .72));
+}
+
+:root[data-theme="forest"] {
+  --color-text-primary: #e2ead9; --color-text-strong: #f0f3e8; --color-text-on-accent: #172116;
+  --color-text-muted: rgb(226 234 217 / .72); --color-text-subtle: rgb(226 234 217 / .58); --color-text-label: rgb(226 234 217 / .84);
+  --color-accent: #b9d77a; --color-accent-soft: rgb(185 215 122 / .13); --color-accent-focus: rgb(185 215 122 / .82);
+  --color-surface-panel: rgb(19 32 23 / .91); --color-surface-card: rgb(24 39 27 / .64); --color-surface-control: rgb(224 239 209 / .055); --color-surface-secondary: rgb(202 224 180 / .08); --color-surface-secondary-quiet: rgb(202 224 180 / .035);
+  --color-border-subtle: rgb(198 222 174 / .11); --color-border-default: rgb(198 222 174 / .16);
+  --gradient-page: radial-gradient(circle at 12% 10%, rgb(151 187 103 / .2), transparent 23rem), radial-gradient(circle at 88% 22%, rgb(76 137 101 / .18), transparent 20rem), linear-gradient(145deg, #142018, #1c2e20 52%, #263827);
+  --gradient-accent: linear-gradient(155deg, #c6dd8e, #73a878); --gradient-panel: linear-gradient(145deg, rgb(185 215 122 / .13), rgb(24 45 30 / .75));
+}
+
+:root[data-theme="ocean"] {
+  --color-text-primary: #dcebed; --color-text-strong: #edf4f3; --color-text-on-accent: #102629;
+  --color-text-muted: rgb(220 235 237 / .72); --color-text-subtle: rgb(220 235 237 / .58); --color-text-label: rgb(220 235 237 / .84);
+  --color-accent: #8bd8d0; --color-accent-soft: rgb(139 216 208 / .13); --color-accent-focus: rgb(139 216 208 / .82);
+  --color-surface-panel: rgb(16 35 42 / .91); --color-surface-card: rgb(20 43 50 / .66); --color-surface-control: rgb(215 241 241 / .055); --color-surface-secondary: rgb(185 230 230 / .08); --color-surface-secondary-quiet: rgb(185 230 230 / .035);
+  --color-border-subtle: rgb(174 222 224 / .11); --color-border-default: rgb(174 222 224 / .16);
+  --gradient-page: radial-gradient(circle at 10% 12%, rgb(80 175 173 / .2), transparent 23rem), radial-gradient(circle at 88% 18%, rgb(76 126 169 / .18), transparent 20rem), linear-gradient(145deg, #12232a, #17343d 52%, #213e49);
+  --gradient-accent: linear-gradient(155deg, #9ce0d8, #569eb9); --gradient-panel: linear-gradient(145deg, rgb(139 216 208 / .13), rgb(19 48 59 / .76));
+}
+
+:root[data-theme="plum"] {
+  --color-text-primary: #eee0e9; --color-text-strong: #f5edf1; --color-text-on-accent: #35172a;
+  --color-text-muted: rgb(238 224 233 / .72); --color-text-subtle: rgb(238 224 233 / .58); --color-text-label: rgb(238 224 233 / .84);
+  --color-accent: #e4a4c6; --color-accent-soft: rgb(228 164 198 / .13); --color-accent-focus: rgb(228 164 198 / .82);
+  --color-surface-panel: rgb(45 24 41 / .91); --color-surface-card: rgb(53 29 47 / .66); --color-surface-control: rgb(245 221 237 / .055); --color-surface-secondary: rgb(235 194 220 / .08); --color-surface-secondary-quiet: rgb(235 194 220 / .035);
+  --color-border-subtle: rgb(231 190 216 / .11); --color-border-default: rgb(231 190 216 / .16);
+  --gradient-page: radial-gradient(circle at 12% 12%, rgb(193 103 154 / .19), transparent 23rem), radial-gradient(circle at 88% 18%, rgb(123 94 162 / .18), transparent 20rem), linear-gradient(145deg, #281825, #3a2034 52%, #47283e);
+  --gradient-accent: linear-gradient(155deg, #edb2d0, #b66a9d); --gradient-panel: linear-gradient(145deg, rgb(228 164 198 / .13), rgb(62 31 54 / .76));
+}
+
+:root[data-theme="slate"] {
+  --color-text-primary: #e2e8ec; --color-text-strong: #f0f2f1; --color-text-on-accent: #292016;
+  --color-text-muted: rgb(226 232 236 / .72); --color-text-subtle: rgb(226 232 236 / .58); --color-text-label: rgb(226 232 236 / .84);
+  --color-accent: #d6ad78; --color-accent-soft: rgb(214 173 120 / .13); --color-accent-focus: rgb(214 173 120 / .82);
+  --color-surface-panel: rgb(28 38 49 / .92); --color-surface-card: rgb(34 46 59 / .68); --color-surface-control: rgb(225 235 241 / .055); --color-surface-secondary: rgb(207 222 232 / .08); --color-surface-secondary-quiet: rgb(207 222 232 / .035);
+  --color-border-subtle: rgb(202 217 228 / .11); --color-border-default: rgb(202 217 228 / .16);
+  --gradient-page: radial-gradient(circle at 10% 12%, rgb(139 169 191 / .19), transparent 23rem), radial-gradient(circle at 88% 18%, rgb(185 125 84 / .15), transparent 20rem), linear-gradient(145deg, #1b2733, #273746 52%, #354553);
+  --gradient-accent: linear-gradient(155deg, #dfbd8d, #9b7654); --gradient-panel: linear-gradient(145deg, rgb(139 169 191 / .14), rgb(37 51 65 / .78));
+}

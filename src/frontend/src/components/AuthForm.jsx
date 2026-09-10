@@ -3,7 +3,6 @@ import { useState } from 'react'
 import React from 'react'
 
 export default function AuthForm({
-  actionLabel,
   altActionLabel,
   altActionHref,
   description,
@@ -49,19 +48,6 @@ export default function AuthForm({
             <h2>{title}</h2>
           </div>
           <p className="panel-subtitle">{description.subtitle}</p>
-        </div>
-
-        <div className="auth-actions">
-          <button type="button" className="secondary-button">
-            Continue with Google
-          </button>
-          <button type="button" className="secondary-button secondary-quiet">
-            {actionLabel}
-          </button>
-        </div>
-
-        <div className="divider">
-          <span>{description.dividerLabel}</span>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>

@@ -15,6 +15,7 @@ import { ResourceState } from '../components/ResourceStates.jsx'
 import useDocumentTitle from '../hooks/useDocumentTitle.js'
 import NavigationLink from '../components/NavigationLink.jsx'
 import { buildPatternPath } from '../routing/routes.js'
+import DecisionSummary from '../components/DecisionSummary.jsx'
 
 function SupportingEvidence({ title, items }) {
   return <article className="evidence-card">
@@ -43,13 +44,31 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
     {resource.data && (() => {
       const { fingerprint, chart } = resource.data
       const primary = fingerprint.primarySetup
+      const scoreSource = fingerprint.scoreSource || fingerprint.activePatterns.find(
+        (item) => item.patternClass !== 'FAILURE' && item.setupScore != null,
+      )
+      const currentScores = Object.values(fingerprint.scores || {}).some((value) => value != null)
+        ? fingerprint.scores
+        : {
+          setup: scoreSource?.setupScore,
+          quality: scoreSource?.qualityScore,
+          maturity: scoreSource?.maturityScore,
+          context: scoreSource?.contextScore,
+        }
+      const scoreEntries = [
+        ['Setup', currentScores.setup],
+        ['Quality', currentScores.quality],
+        ['Maturity', currentScores.maturity],
+        ['Context', currentScores.context],
+      ].filter(([, value]) => value != null)
       return <>
         <PageIntro
-          eyebrow="Technical fingerprint"
           title={fingerprint.security.symbol || fingerprint.security.isin}
           description={`${fingerprint.security.name || 'NSE security'}${fingerprint.security.sectorName ? ` - ${fingerprint.security.sectorName}` : ''}`}
           date={fingerprint.dataAsOf}
         />
+
+        {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>Current operating view</h2></div><StateBadge state={primary.state} /></div><DecisionSummary decision={primary.decision} /></section>}
 
         <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} evidence={chart.evidence} corporateActions={chart.corporateActions} range={chartRange} onRangeChange={setChartRange} /></section>
 
@@ -60,11 +79,12 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
           </article>
           <article className="evidence-card">
             <h2>Current scores</h2>
-            <Score label="Setup" value={fingerprint.scores.setup} />
-            <Score label="Quality" value={fingerprint.scores.quality} />
-            <Score label="Maturity" value={fingerprint.scores.maturity} />
-            <Score label="Context" value={fingerprint.scores.context} />
-            <p className="ranking-note">Ranking score, not historical probability.</p>
+            {scoreEntries.length
+              ? <>
+                {scoreSource && <p className="muted-copy">Best active signal: {scoreSource.variant || scoreSource.patternType}</p>}
+                {scoreEntries.map(([label, value]) => <Score key={label} label={label} value={value} />)}
+              </>
+              : <p className="muted-copy">No active scored signal is available for this equity.</p>}
           </article>
         </section>
 

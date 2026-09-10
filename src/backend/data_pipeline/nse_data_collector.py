@@ -22,7 +22,7 @@ class NseDataCollector:
         self._nse_client = nse_client or NseApiClient()
         self._run_repository = run_repository
 
-    def DownloadEquities(self) -> int:
+    def DownloadEquities(self, *, initiated_by: str = "manual") -> int:
         """Download, validate, and upsert NSE equity master records.
 
         The PascalCase name is intentionally retained for the scheduled-job API.
@@ -30,7 +30,9 @@ class NseDataCollector:
         started = perf_counter(); run_id = None
         if self._run_repository is not None:
             from pattern_engine.enums import ImportJobType, ImportStatus
-            run_id = self._run_repository.create_import_run(ImportJobType.EQUITY_MASTER, "manual")
+            run_id = self._run_repository.create_import_run(
+                ImportJobType.EQUITY_MASTER, initiated_by
+            )
             self._run_repository.update_import_run(run_id, ImportStatus.RUNNING)
         try:
             csv_content = self._nse_client.download_equities_csv()
@@ -44,9 +46,9 @@ class NseDataCollector:
             self._run_repository.update_import_run(run_id, ImportStatus.COMPLETED, rows_downloaded=len(equities), rows_inserted=count, duration_ms=round((perf_counter() - started) * 1000), source_metrics=getattr(self._nse_client, "metrics", {}))
         return count
 
-    def download_equities(self) -> int:
+    def download_equities(self, *, initiated_by: str = "manual") -> int:
         """PEP-8 alias for :meth:`DownloadEquities`."""
-        return self.DownloadEquities()
+        return self.DownloadEquities(initiated_by=initiated_by)
 
     @staticmethod
     def _parse_equities(csv_content: bytes) -> list[dict[str, object]]:

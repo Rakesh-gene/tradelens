@@ -5,6 +5,7 @@ const STATIC_ROUTES = new Map([
   ['/signup', { name: 'signup', protected: false }],
   ['/overview', { name: 'overview', protected: true }],
   ['/setups', { name: 'setups', protected: true }],
+  ['/profile', { name: 'profile', protected: true }],
   ['/admin/pipeline', { name: 'admin-pipeline', protected: true, admin: true }],
 ])
 

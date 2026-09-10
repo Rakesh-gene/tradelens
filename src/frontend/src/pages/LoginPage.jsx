@@ -1,9 +1,8 @@
 import AuthForm from '../components/AuthForm.jsx'
+import SiteFooter from '../components/SiteFooter.jsx'
 import { login } from '../api/authApi.js'
 
 import React from 'react'
-
-const navItems = ['Screens', 'Breakouts', 'Market', 'Learn']
 
 const loginFields = [
   {
@@ -24,6 +23,7 @@ const loginFields = [
 
 export default function LoginPage({ notice, onAuthenticated }) {
   return (
+    <div className="public-shell">
     <main className="login-shell">
       <section className="left-panel" aria-hidden="true">
         <header className="topbar">
@@ -31,24 +31,13 @@ export default function LoginPage({ notice, onAuthenticated }) {
             <div className="brand-mark">TL</div>
             <div>
               <p className="brand-name">Tradelens</p>
-              <p className="brand-meta">Watch the market show its hand.</p>
             </div>
           </div>
-
-          <nav className="topnav" aria-label="Primary">
-            {navItems.map((item) => (
-              <span key={item}>{item}</span>
-            ))}
-          </nav>
         </header>
 
         <div className="hero-copy">
-          <p className="eyebrow">Secure access</p>
-          <h1>Sign in to the screen that measures the close.</h1>
-          <p className="hero-description">
-            A focused login for charts, scans, and the breakout record. Built
-            to feel like Tradelens, with the same calm, rules-first tone.
-          </p>
+          <h1>End-of-day market analysis.</h1>
+          <p className="hero-description">Review setups, evidence, and risk levels.</p>
         </div>
 
       </section>
@@ -59,11 +48,9 @@ export default function LoginPage({ notice, onAuthenticated }) {
           title="Welcome back."
           description={{
             subtitle: 'Sign in to continue',
-            dividerLabel: 'or use your password',
             switchText: 'Need an account?',
             successMessage: 'Signed in successfully.',
           }}
-          actionLabel="Email sign-in link"
           altActionLabel="Create an account"
           altActionHref="/signup"
           fields={loginFields}
@@ -88,12 +75,9 @@ export default function LoginPage({ notice, onAuthenticated }) {
             onAuthenticated(payload.accessToken, payload.user)
           }}
         />
-
-        <p className="legal-copy">
-          Not financial advice. Tradelens is a stock screening and market
-          analytics tool, not a recommendation engine.
-        </p>
       </section>
     </main>
+    <SiteFooter />
+    </div>
   )
 }

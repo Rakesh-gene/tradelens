@@ -1,4 +1,5 @@
 import AuthForm from '../components/AuthForm.jsx'
+import SiteFooter from '../components/SiteFooter.jsx'
 import { register } from '../api/authApi.js'
 
 import React from 'react'
@@ -29,40 +30,20 @@ const signupFields = [
 
 export default function SignupPage({ onRegistered }) {
   return (
+    <div className="public-shell">
     <main className="login-shell login-shell--signup">
       <section className="signup-aside" aria-hidden="true">
-        <p className="eyebrow">Create access</p>
-        <h1>Open an account and start tracking the close.</h1>
-        <p className="hero-description">
-          Registration feeds the same API the login page uses, with reusable
-          form pieces and a postgres-backed repository in the backend.
-        </p>
-
-        <div className="signup-notes">
-          <article>
-            <strong>Reusable form</strong>
-            <p>Shared fields and actions keep the auth UI consistent.</p>
-          </article>
-          <article>
-            <strong>API first</strong>
-            <p>Registration posts to <code>/api/register</code>.</p>
-          </article>
-          <article>
-            <strong>Testable backend</strong>
-            <p>Repository and service are injected into the HTTP handler.</p>
-          </article>
-        </div>
+        <h1>Create your TradeLens account.</h1>
+        <p className="hero-description">Access market setups, evidence, and risk levels.</p>
       </section>
 
       <AuthForm
         title="Create your account."
         description={{
           subtitle: 'Register with email and password',
-          dividerLabel: 'or sign up with email',
           switchText: 'Already have an account?',
           successMessage: 'Registration completed.',
         }}
-        actionLabel="Email sign-up link"
         altActionLabel="Sign in"
         altActionHref="/"
         fields={signupFields}
@@ -76,5 +57,7 @@ export default function SignupPage({ onRegistered }) {
         }}
       />
     </main>
+    <SiteFooter />
+    </div>
   )
 }

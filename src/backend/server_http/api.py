@@ -59,6 +59,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "user": {
                     "id": user.get("id"), "email": user.get("email"),
                     "isAdmin": bool(user.get("is_admin", False)),
+                    "theme": user.get("theme", "ember"),
                 },
             })
             return
@@ -110,6 +111,22 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+
+    def do_PATCH(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
+        if path != "/api/profile":
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            return
+        try:
+            user = self.service.update_theme(self._access_token(), self._read_json().get("theme"))
+        except (json.JSONDecodeError, TypeError) as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        except ValueError as exc:
+            status = HTTPStatus.UNAUTHORIZED if "token" in str(exc).lower() or "authorization" in str(exc).lower() else HTTPStatus.BAD_REQUEST
+            self._send_json(status, {"error": str(exc)})
+            return
+        self._send_json(HTTPStatus.OK, {"user": user})
 
     @staticmethod
     def _is_pattern_path(path):
@@ -225,6 +242,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                             "id": authentication.user_id,
                             "email": authentication.email,
                             "isAdmin": authentication.is_admin,
+                            "theme": authentication.theme,
                         },
                     },
                 )

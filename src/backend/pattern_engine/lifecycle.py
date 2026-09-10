@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from hashlib import sha256
@@ -70,6 +70,7 @@ class PatternLifecycleService:
             instance = self._repository.create_pattern(values, event)
             return LifecycleResult("created", instance, PatternEventType.PATTERN_DETECTED)
         current_state = PatternState(str(_field(match, "state")))
+        candidate = self._retain_forward_state(current_state, candidate)
         self._validate_transition(current_state, candidate.state)
         values = self._update_values(candidate, match)
         event_type = self._meaningful_event(match, values, candidate.state)
@@ -122,6 +123,16 @@ class PatternLifecycleService:
         return results
 
     def _match(self, candidate, active):
+        deduplication_key = _deduplication_key(candidate)
+        exact = [
+            instance for instance in active
+            if _field(instance, "active_deduplication_key") == deduplication_key
+        ]
+        if exact:
+            return max(
+                exact,
+                key=lambda row: _as_date(_field(row, "last_updated_date")),
+            )
         matches = []
         for instance in active:
             state = PatternState(str(_field(instance, "state")))
@@ -138,6 +149,22 @@ class PatternLifecycleService:
             if overlaps and similar:
                 matches.append(instance)
         return max(matches, key=lambda row: _as_date(_field(row, "last_updated_date")), default=None)
+
+    @staticmethod
+    def _retain_forward_state(previous, candidate):
+        """Keep lifecycle progression monotonic while refreshing daily evidence."""
+        new = candidate.state
+        if previous not in _RANK or new not in _RANK or _RANK[new] >= _RANK[previous]:
+            return candidate
+        return replace(
+            candidate,
+            state=previous,
+            measurements={
+                **dict(candidate.measurements),
+                "observed_state": new.value,
+                "lifecycle_state_retained": previous.value,
+            },
+        )
 
     def _validate_detector_state(self, candidate):
         allowed = {

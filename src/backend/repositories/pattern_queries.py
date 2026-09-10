@@ -297,8 +297,23 @@ class PostgresPatternQueryRepository:
     def get_pattern(self, pattern_id):
         return self._fetch_one(
             """
-            SELECT p.*, equity.symbol, equity.company_name
+            SELECT p.*, equity.symbol, equity.company_name,
+                   feature.close_price AS last_close,
+                   feature.relative_strength_6m, feature.relative_strength_percentile,
+                   CASE WHEN p.pivot_price IS NULL OR feature.close_price IS NULL OR p.pivot_price = 0
+                        THEN NULL ELSE (feature.close_price - p.pivot_price) / p.pivot_price * 100 END AS distance_to_pivot_pct
             FROM pattern_instances p JOIN nse_equities equity ON equity.isin = p.isin
+            LEFT JOIN LATERAL (
+                SELECT features.relative_strength_6m, features.relative_strength_percentile,
+                       bars.close_price
+                FROM technical_features features
+                LEFT JOIN adjusted_daily_bars bars
+                  ON bars.isin = features.isin AND bars.trading_date = features.trading_date
+                 AND bars.adjustment_version = p.adjustment_version
+                WHERE features.isin = p.isin AND features.trading_date <= p.last_updated_date
+                  AND features.feature_version = p.feature_version
+                ORDER BY features.trading_date DESC LIMIT 1
+            ) feature ON TRUE
             WHERE p.id = %s
             """, (pattern_id,),
         )
@@ -367,14 +382,34 @@ class PostgresPatternQueryRepository:
 
     def get_latest_feature(self, isin, as_of):
         return self._fetch_one(
-            """SELECT features.*, bars.close_price FROM technical_features features
+            """WITH target AS (
+                   SELECT * FROM technical_features
+                   WHERE isin = %s AND trading_date <= %s
+                   ORDER BY trading_date DESC, generated_at DESC LIMIT 1
+               ), raw_ranked AS (
+                   SELECT feature.isin,
+                          DENSE_RANK() OVER (ORDER BY feature.relative_strength_composite) AS rank_index
+                   FROM technical_features feature, target
+                   WHERE feature.trading_date = target.trading_date
+                     AND feature.feature_version = target.feature_version
+                     AND feature.relative_strength_composite IS NOT NULL
+               ), ranked AS (
+                   SELECT isin,
+                          (rank_index - 1) * 100.0 /
+                          GREATEST(1, MAX(rank_index) OVER () - 1) AS computed_percentile
+                   FROM raw_ranked
+               )
+               SELECT features.*,
+                      COALESCE(features.relative_strength_percentile, ranked.computed_percentile)
+                          AS relative_strength_percentile,
+                      bars.close_price
+               FROM target features
                LEFT JOIN LATERAL (
                    SELECT close_price FROM adjusted_daily_bars
                    WHERE isin = features.isin AND trading_date = features.trading_date
                    ORDER BY generated_at DESC LIMIT 1
                ) bars ON TRUE
-               WHERE features.isin = %s AND features.trading_date <= %s
-               ORDER BY features.trading_date DESC, features.generated_at DESC LIMIT 1""", (isin, as_of),
+               LEFT JOIN ranked ON ranked.isin = features.isin""", (isin, as_of),
         )
 
     def list_security_patterns(self, isin, as_of, limit=50):

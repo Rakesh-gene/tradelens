@@ -13,12 +13,24 @@ vi.mock('./pages/SetupsPage.jsx', () => ({ default: () => <h1>Setups fixture</h1
 vi.mock('./pages/PatternDetailPage.jsx', () => ({ default: () => <h1>Pattern fixture</h1> }))
 vi.mock('./pages/SecurityPage.jsx', () => ({ default: () => <h1>Security fixture</h1> }))
 vi.mock('./pages/AdminPipelinePage.jsx', () => ({ default: () => <h1>Pipeline fixture</h1> }))
+vi.mock('./pages/ProfilePage.jsx', () => ({ default: () => <h1>Profile fixture</h1> }))
 
 describe('App session routing', () => {
   beforeEach(() => {
     sessionStorage.clear()
+    localStorage.clear()
     getCurrentUser.mockReset()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('opens the authenticated profile route and applies the saved user theme', async () => {
+    sessionStorage.setItem('tradelensAccessToken', 'test-token')
+    window.history.replaceState({}, '', '/profile')
+    getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com', theme: 'forest' } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Profile fixture' })).toBeTruthy()
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('forest'))
+    expect(localStorage.getItem('tradelensTheme')).toBe('forest')
   })
 
   it('validates a token before rendering protected content and signs out with replacement', async () => {
@@ -39,7 +51,7 @@ describe('App session routing', () => {
     window.history.replaceState({}, '', '/patterns/not-a-uuid')
     getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com' } })
     render(<App />)
-    expect(await screen.findByRole('heading', { name: 'This route does not exist.' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeTruthy()
     expect(screen.queryByText('Pattern fixture')).toBeNull()
   })
 })

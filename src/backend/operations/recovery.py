@@ -46,7 +46,16 @@ class RecoveryService:
         )
         effective_versions = PatternEngineVersions(versions.engine, versions.feature, adjusted.adjustment_version)
         report = self._runner.run_security(isin, effective_to_date, effective_versions, initiated_by="recovery")
-        result = {"isin": isin, "asOf": effective_to_date, "adjustmentVersion": adjusted.adjustment_version, "runId": report.run_id, "status": report.status.value, "metrics": report.metrics, "durationMs": round((perf_counter() - started) * 1000)}
+        failures = [
+            {
+                "isin": outcome.isin,
+                "asOf": outcome.as_of_date,
+                "reason": outcome.reason or "Pattern scan failed",
+            }
+            for outcome in getattr(report, "outcomes", ())
+            if outcome.status == "FAILED"
+        ]
+        result = {"isin": isin, "asOf": effective_to_date, "adjustmentVersion": adjusted.adjustment_version, "runId": report.run_id, "status": report.status.value, "metrics": report.metrics, "failures": failures, "durationMs": round((perf_counter() - started) * 1000)}
         if self._logger: self._logger.emit("security_rebuild_completed", run_id=report.run_id, job_type="PATTERN_SCAN", isin=isin, requested_from_date=from_date, requested_to_date=to_date, duration_ms=result["durationMs"], row_count=report.metrics.get("candidatesDetected"), source_status=result["status"])
         return result
 

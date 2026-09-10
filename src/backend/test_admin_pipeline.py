@@ -109,14 +109,37 @@ class ConcurrentHistoryService(HistoryService):
 
 
 class RecoveryService:
-    def __init__(self): self.calls = []
+    def __init__(self): self.calls = []; self.failed = set()
     def rebuild_security(self, isin, from_date, to_date, versions, dry_run=False):
         self.calls.append((isin, from_date, to_date, versions))
+        if isin in self.failed:
+            return {
+                "runId": f"pattern-{isin}", "status": "FAILED", "metrics": {},
+                "failures": [{"reason": "Backward lifecycle transition READY -> MATURE"}],
+            }
         return {"runId": f"pattern-{isin}", "status": "COMPLETED", "metrics": {"candidatesDetected": 3}}
 
 
+class EquityCollector:
+    def __init__(self, repository, *, error=None):
+        self.repository = repository
+        self.error = error
+        self.calls = []
+
+    def download_equities(self, *, initiated_by):
+        self.calls.append(initiated_by)
+        if self.error:
+            raise self.error
+        self.repository.equities.append({
+            "isin": "INE000000003", "symbol": "NEWIPO",
+            "company_name": "New IPO Limited", "series": "EQ",
+            "listed_on": date(2026, 9, 7),
+        })
+        return len(self.repository.equities)
+
+
 class AdminPipelineServiceTestCase(unittest.TestCase):
-    def _service(self, failed=()):
+    def _service(self, failed=(), *, equity_collector=None):
         self.repository = PipelineRepository()
         self.history = HistoryService(failed)
         self.recovery = RecoveryService()
@@ -125,6 +148,7 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
             load_pattern_engine_configuration(), executor=lambda action: action(),
             today=lambda: date(2026, 9, 5),
             max_workers=1,
+            equity_collector=equity_collector,
         )
 
     def test_lists_paginated_equities_and_runs_every_stage_for_selected_rows(self):
@@ -151,6 +175,17 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
         self.assertEqual(1, result["run"]["securitiesCompleted"])
         self.assertEqual(1, result["run"]["securitiesFailed"])
         self.assertEqual(["COMPLETED", "FAILED"], [item["status"] for item in result["run"]["items"]])
+
+    def test_pattern_failure_preserves_run_id_and_exposes_root_cause(self):
+        service = self._service()
+        self.recovery.failed.add("INE467B01029")
+
+        result = service.start({"isins": ["INE467B01029"]}, "admin-1")
+
+        item = result["run"]["items"][0]
+        self.assertEqual("FAILED", item["status"])
+        self.assertEqual("pattern-INE467B01029", item["patternRunId"])
+        self.assertIn("Backward lifecycle transition", item["error"])
 
     def test_resume_retries_only_unfinished_equities_and_preserves_completed_work(self):
         service = self._service({"INE467B01029"})
@@ -235,7 +270,16 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
             service.start({"allEquities": True, "batchSize": 101}, "admin-1")
 
     def test_scheduled_run_is_incremental_unattended_and_idempotent(self):
-        service = self._service()
+        self.repository = PipelineRepository()
+        collector = EquityCollector(self.repository)
+        self.history = HistoryService()
+        self.recovery = RecoveryService()
+        service = AdminPipelineService(
+            self.repository, self.history, self.recovery,
+            load_pattern_engine_configuration(), executor=lambda action: action(),
+            today=lambda: date(2026, 9, 5), max_workers=1,
+            equity_collector=collector,
+        )
 
         first = service.ensure_scheduled_run(date(2026, 9, 7), batch_size=1)
         second = service.ensure_scheduled_run(date(2026, 9, 7), batch_size=1)
@@ -248,6 +292,23 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
         self.assertEqual(date(2026, 9, 7), run["scheduled_for"])
         self.assertFalse(run["force_refresh"])
         self.assertTrue(all(request.initiated_by == "scheduler" for request in self.history.requests))
+        self.assertEqual(["scheduler"], collector.calls)
+        self.assertEqual(3, run["securities_total"])
+        self.assertTrue(any(item["symbol"] == "NEWIPO" for item in run["items"]))
+
+    def test_failed_equity_refresh_prevents_stale_scheduled_snapshot(self):
+        self.repository = PipelineRepository()
+        collector = EquityCollector(self.repository, error=RuntimeError("NSE master unavailable"))
+        service = AdminPipelineService(
+            self.repository, HistoryService(), RecoveryService(),
+            load_pattern_engine_configuration(), executor=lambda action: action(),
+            max_workers=1, equity_collector=collector,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "NSE master unavailable"):
+            service.ensure_scheduled_run(date(2026, 9, 7))
+
+        self.assertEqual({}, self.repository.runs)
 
     def test_interrupted_scheduled_run_is_automatically_resumed_once(self):
         service = self._service({"INE467B01029"})

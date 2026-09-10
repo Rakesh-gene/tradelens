@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from pattern_engine.enums import PatternClass, PatternState, SUPPORTED_PATTERN_TYPES
+from pattern_engine.decision_intelligence import METHODOLOGY_VERSION as DECISION_VERSION, build_decision
 from pattern_engine.models import serialize_value
 
 
@@ -111,6 +112,7 @@ class PatternQueryService:
                 "activeStates": list(_ACTIVE_OPPORTUNITY_STATES),
                 "excludedStates": ["FAILED", "INVALIDATED", "EXPIRED"],
                 "historicalOutcomesIncluded": False,
+                "decisionMethodologyVersion": DECISION_VERSION,
             },
         }
 
@@ -208,6 +210,10 @@ class PatternQueryService:
         events = self._repository.list_security_events(isin, as_of)
         active = [row for row in patterns if row.get("terminal_date") is None]
         primary = next((row for row in active if row.get("pattern_class") in {"BASE", "BREAKOUT", "PULLBACK"}), None)
+        score_source = next((
+            row for row in active
+            if row.get("pattern_class") != "FAILURE" and row.get("setup_score") is not None
+        ), None)
         supporting = lambda kind: [_setup(row) for row in active if row.get("pattern_class") == kind]
         return {
             "security": _security(security), "dataAsOf": feature.get("trading_date") or as_of,
@@ -217,6 +223,7 @@ class PatternQueryService:
                 "ema20Slope": feature.get("ema_20_slope"), "sma50Slope": feature.get("sma_50_slope"),
             },
             "primarySetup": _pattern(primary) if primary else None,
+            "scoreSource": _setup(score_source) if score_source else None,
             "compression": supporting("COMPRESSION"), "momentum": supporting("MOMENTUM"),
             "relativeStrength": {key: feature.get(value) for key, value in {
                 "oneMonth": "relative_strength_1m", "threeMonth": "relative_strength_3m",
@@ -238,18 +245,18 @@ class PatternQueryService:
                 "supportPrice": primary.get("support_price") if primary else None,
                 "invalidationPrice": primary.get("invalidation_price") if primary else None,
             },
-            "context": (primary.get("measurements") or {}).get("scoring", {}).get("context_inputs", {}) if primary else {},
-            "scores": {key: primary.get(value) if primary else None for key, value in {
+            "context": (score_source.get("measurements") or {}).get("scoring", {}).get("context_inputs", {}) if score_source else {},
+            "scores": {key: score_source.get(value) if score_source else None for key, value in {
                 "quality": "quality_score", "maturity": "maturity_score",
                 "context": "context_score", "setup": "setup_score",
             }.items()},
             "activePatterns": [_setup(row) for row in active],
             "recentEvents": [_event(row) for row in events],
             "lineage": {
-                "engineVersion": primary.get("engine_version") if primary else None,
-                "configurationVersion": primary.get("configuration_version") if primary else None,
-                "featureVersion": primary.get("feature_version") if primary else feature.get("feature_version"),
-                "adjustmentVersion": primary.get("adjustment_version") if primary else None,
+                "engineVersion": score_source.get("engine_version") if score_source else None,
+                "configurationVersion": score_source.get("configuration_version") if score_source else None,
+                "featureVersion": score_source.get("feature_version") if score_source else feature.get("feature_version"),
+                "adjustmentVersion": score_source.get("adjustment_version") if score_source else None,
             },
         }
 
@@ -301,6 +308,7 @@ def _setup(row):
     context_inputs = scoring.get("context_inputs", {}) if isinstance(scoring, Mapping) else {}
     result = {"patternInstanceId": row.get("id") or row.get("pattern_instance_id"), "security": _security(row), "patternClass": row.get("pattern_class"), "patternType": row.get("pattern_type"), "variant": row.get("variant"), "state": row.get("state"), "detectedDate": row.get("detected_date"), "lastUpdatedDate": row.get("last_updated_date"), "qualityScore": row.get("quality_score"), "maturityScore": row.get("maturity_score"), "maturityBand": scoring.get("maturity_band"), "contextScore": row.get("context_score"), "setupScore": row.get("setup_score"), "pivotPrice": row.get("pivot_price"), "lastClose": row.get("last_close"), "distanceToPivotPct": row.get("distance_to_pivot_pct"), "relativeStrength6m": row.get("relative_strength_6m"), "liquidityScore": context_inputs.get("liquidity"), "supportingPatterns": row.get("supporting_patterns") or [], "evidenceCount": row.get("evidence_count", 1)}
     result["bestFit"] = _best_fit(row, result)
+    result["decision"] = build_decision(row, result)
     return result
 
 

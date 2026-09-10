@@ -29,13 +29,13 @@ class PostgresUserRepository:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, email, password_hash, is_admin FROM users WHERE email = %s",
+                    "SELECT id, email, password_hash, is_admin, theme_preference FROM users WHERE email = %s",
                     (email.lower(),),
                 )
                 row = cursor.fetchone()
         if row is None:
             return None
-        return {"id": str(row[0]), "email": row[1], "password_hash": row[2], "is_admin": row[3]}
+        return {"id": str(row[0]), "email": row[1], "password_hash": row[2], "is_admin": row[3], "theme_preference": row[4]}
 
     def create_user(self, email: str, password_hash: str) -> dict[str, object]:
         user_id = str(uuid4())
@@ -46,4 +46,17 @@ class PostgresUserRepository:
                     (user_id, email.lower(), password_hash),
                 )
             connection.commit()
-        return {"id": user_id, "email": email.lower(), "password_hash": password_hash}
+        return {"id": user_id, "email": email.lower(), "password_hash": password_hash, "is_admin": False, "theme_preference": "ember"}
+
+    def update_theme_preference(self, user_id: str, theme: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET theme_preference = %s WHERE id = %s RETURNING id, email, is_admin, theme_preference",
+                    (theme, user_id),
+                )
+                row = cursor.fetchone()
+            connection.commit()
+        if row is None:
+            return None
+        return {"id": str(row[0]), "email": row[1], "is_admin": row[2], "theme_preference": row[3]}

@@ -98,9 +98,9 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   }
 
   return <>
-    <PageIntro eyebrow="Administrator operations" title="Run the full market pipeline." description="Run selected securities or the complete equity universe. Missing NSE sessions are imported first, then bounded workers run adjustments, features and every detector." />
+    <PageIntro title="Pipeline" />
     <section className="admin-run-controls" aria-labelledby="pipeline-controls-title">
-      <div><p className="eyebrow">Selected batch</p><h2 id="pipeline-controls-title">{selected.size} equities selected</h2><p>Selections remain checked while you move between pages.</p></div>
+      <div><h2 id="pipeline-controls-title">{selected.size} equities selected</h2></div>
       <label>Analysis history from<input type="date" value={fromDate} max={toDate} onChange={(event) => setFromDate(event.target.value)} /></label>
       <label>Through<input type="date" value={toDate} min={fromDate} onChange={(event) => setToDate(event.target.value)} /></label>
       <label>Batch size<input type="number" min="1" max="100" value={batchSize} onChange={(event) => setBatchSize(event.target.value)} /></label>
