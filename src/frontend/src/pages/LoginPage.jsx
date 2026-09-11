@@ -1,6 +1,7 @@
 import AuthForm from '../components/AuthForm.jsx'
 import SiteFooter from '../components/SiteFooter.jsx'
 import { login } from '../api/authApi.js'
+import useDocumentTitle from '../hooks/useDocumentTitle.js'
 
 import React from 'react'
 
@@ -22,6 +23,7 @@ const loginFields = [
 ]
 
 export default function LoginPage({ notice, onAuthenticated }) {
+  useDocumentTitle('Sign in')
   return (
     <div className="public-shell">
     <main className="login-shell">

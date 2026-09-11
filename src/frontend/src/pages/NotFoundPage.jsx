@@ -1,6 +1,8 @@
 import SiteFooter from '../components/SiteFooter.jsx'
+import useDocumentTitle from '../hooks/useDocumentTitle.js'
 
 export default function NotFoundPage({ onNavigate, withFooter = false }) {
+  useDocumentTitle('Page not found')
   const content = (
     <main className="standalone-state" aria-labelledby="not-found-title">
       <p className="eyebrow">404</p>

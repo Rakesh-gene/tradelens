@@ -1,6 +1,7 @@
 import AuthForm from '../components/AuthForm.jsx'
 import SiteFooter from '../components/SiteFooter.jsx'
 import { register } from '../api/authApi.js'
+import useDocumentTitle from '../hooks/useDocumentTitle.js'
 
 import React from 'react'
 
@@ -29,6 +30,7 @@ const signupFields = [
 ]
 
 export default function SignupPage({ onRegistered }) {
+  useDocumentTitle('Create account')
   return (
     <div className="public-shell">
     <main className="login-shell login-shell--signup">

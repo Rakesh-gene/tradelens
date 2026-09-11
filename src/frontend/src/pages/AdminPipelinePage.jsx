@@ -3,6 +3,7 @@ import { controlPipelineRun, createPipelineRun, getAdminEquities, getPipelineRun
 import useApiResource from '../useApiResource.js'
 import { PageIntro, ResourceState, StateBadge } from '../components/PatternUi.jsx'
 import { formatMarketDate } from '../utils/formatters.js'
+import useDocumentTitle from '../hooks/useDocumentTitle.js'
 
 const TERMINAL = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'PAUSED', 'TERMINATED', 'CANCELLED'])
 
@@ -11,6 +12,7 @@ function defaultFromDate() { const value = new Date(); value.setFullYear(value.g
 function stageLabel(value) { return String(value || 'QUEUED').replaceAll('_', ' ').toLowerCase().replace(/^./, (letter) => letter.toUpperCase()) }
 
 export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
+  useDocumentTitle('Pipeline')
   const [page, setPage] = useState(1)
   const [searchText, setSearchText] = useState('')
   const [search, setSearch] = useState('')
