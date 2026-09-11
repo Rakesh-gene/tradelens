@@ -16,6 +16,8 @@ describe('PatternFilters', () => {
     expect(screen.getByRole('option', { name: 'BASE-VCP' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'BRK-MULTIY' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'COMP-IB' })).toBeTruthy()
+    expect(screen.getAllByRole('combobox')).toHaveLength(5)
+    expect(screen.getAllByRole('combobox').every((control) => control.classList.contains('select-control'))).toBe(true)
     expect(screen.queryByLabelText('Sector')).toBeNull()
     expect(screen.queryByLabelText('Variant')).toBeNull()
     expect(screen.queryByLabelText('Minimum RS 6M')).toBeNull()

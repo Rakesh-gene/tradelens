@@ -4,16 +4,19 @@ from datetime import date, datetime
 from decimal import Decimal
 import unittest
 
-from data_pipeline.adjustments import AdjustmentRequest, AdjustmentService
+from data_pipeline.adjustments import (
+    AdjustmentRequest, AdjustmentService, CorporateActionAdjustmentError,
+)
 
 
 class AdjustmentRepository:
-    def __init__(self, actions):
+    def __init__(self, actions, bars=None):
         self.actions = actions
+        self.bars = bars
         self.written = []
 
     def load_raw_bars(self, isin, from_date, to_date):
-        return [
+        return self.bars or [
             {"isin": isin, "trading_date": date(2020, 1, 1), "open_price": Decimal("100"),
              "high_price": Decimal("110"), "low_price": Decimal("90"), "close_price": Decimal("100"),
              "volume": 1000, "raw_revision": 1},
@@ -67,7 +70,7 @@ class AdjustmentServiceTestCase(unittest.TestCase):
 
         self.assertEqual(first.action_set_checksum, second.action_set_checksum)
         self.assertEqual(first.adjustment_version, second.adjustment_version)
-        self.assertEqual(first_rows[0]["close_price"], Decimal("45.00"))
+        self.assertEqual(first_rows[0]["close_price"], Decimal("47.50"))
         self.assertEqual(first_rows[0]["action_set_checksum"], first.action_set_checksum)
 
     def test_revised_action_changes_version_without_mutating_raw_input(self):
@@ -106,10 +109,27 @@ class AdjustmentServiceTestCase(unittest.TestCase):
         self.assertEqual(first.action_set_checksum, second.action_set_checksum)
         self.assertEqual(first.adjustment_version, second.adjustment_version)
 
-    def test_consolidation_adjusts_price_and_rights_buyback_other_are_identity(self):
+    def test_ignored_dividend_does_not_change_the_price_scale_version(self):
+        repository = AdjustmentRepository([])
+        request = AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1),
+            cash_dividend_policy="ignore",
+        )
+        first = AdjustmentService(repository).rebuild(request)
+        repository.actions = [{
+            "source_event_key": "NSE:dividend:1", "action_type": "DIVIDEND",
+            "ex_date": date(2021, 1, 1), "cash_value": Decimal("5"),
+            "source_checksum": "new",
+        }]
+        second = AdjustmentService(repository).rebuild(request)
+
+        self.assertNotEqual(first.action_set_checksum, second.action_set_checksum)
+        self.assertEqual(first.adjustment_version, second.adjustment_version)
+
+    def test_consolidation_adjusts_price_and_buyback_other_are_identity(self):
         identity_actions = [
             {"source_event_key": f"NSE:{kind}", "action_type": kind, "ex_date": date(2021, 1, 1), "source_checksum": kind}
-            for kind in ("RIGHTS", "BUYBACK", "OTHER")
+            for kind in ("BUYBACK", "OTHER")
         ]
         repository = AdjustmentRepository(identity_actions + [{
             "source_event_key": "NSE:consolidation", "action_type": "CONSOLIDATION",
@@ -117,10 +137,107 @@ class AdjustmentServiceTestCase(unittest.TestCase):
             "denominator": Decimal("1"), "source_checksum": "c",
         }])
 
-        AdjustmentService(repository).rebuild(AdjustmentRequest("INE000000001", date(2020, 1, 1), date(2021, 1, 1)))
+        AdjustmentService(repository).rebuild(AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1),
+            maximum_ex_date_jump_pct=Decimal("1000"),
+        ))
 
         self.assertEqual(repository.written[0]["close_price"], Decimal("500.00"))
         self.assertEqual(repository.written[0]["volume"], 200)
+
+    def test_rights_uses_issue_price_cum_close_and_entitlement_volume(self):
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:rights", "action_type": "RIGHTS",
+            "ex_date": date(2021, 1, 1), "numerator": Decimal("1"),
+            "denominator": Decimal("1"), "issue_price": Decimal("70"),
+        }])
+
+        AdjustmentService(repository).rebuild(AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1),
+            maximum_ex_date_jump_pct=Decimal("100"),
+        ))
+
+        self.assertEqual(repository.written[0]["close_price"], Decimal("85.00"))
+        self.assertEqual(repository.written[0]["volume"], 2000)
+
+    def test_dividend_uses_cum_close_and_does_not_adjust_volume(self):
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:dividend", "action_type": "DIVIDEND",
+            "ex_date": date(2021, 1, 1), "cash_value": Decimal("5"),
+        }])
+
+        AdjustmentService(repository).rebuild(AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1),
+            cash_dividend_policy="adjust_price",
+        ))
+
+        self.assertEqual(repository.written[0]["close_price"], Decimal("95.00"))
+        self.assertEqual(repository.written[0]["volume"], 1000)
+
+    def test_composite_bonus_split_multiplies_both_terms(self):
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:composite", "action_type": "BONUS_SPLIT",
+            "ex_date": date(2021, 1, 1), "numerator": Decimal("1"),
+            "denominator": Decimal("1"), "old_face_value": Decimal("10"),
+            "new_face_value": Decimal("2"),
+        }])
+
+        AdjustmentService(repository).rebuild(AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1),
+            maximum_ex_date_jump_pct=Decimal("100"),
+        ))
+
+        self.assertEqual(repository.written[0]["close_price"], Decimal("10.00"))
+        self.assertEqual(repository.written[0]["volume"], 10000)
+
+    def test_unresolved_material_action_is_not_silently_ignored(self):
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:demerger", "action_type": "DEMERGER",
+            "ex_date": date(2021, 1, 1),
+        }])
+
+        with self.assertRaisesRegex(CorporateActionAdjustmentError, "reviewed manual"):
+            AdjustmentService(repository).rebuild(AdjustmentRequest(
+                "INE000000001", date(2020, 1, 1), date(2021, 1, 1)
+            ))
+
+    def test_reviewed_factor_resolves_non_deterministic_action(self):
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:demerger", "action_type": "DEMERGER",
+            "ex_date": date(2021, 1, 1), "manual_price_factor": Decimal("0.5"),
+            "manual_volume_factor": Decimal("1"),
+        }])
+
+        AdjustmentService(repository).rebuild(AdjustmentRequest(
+            "INE000000001", date(2020, 1, 1), date(2021, 1, 1)
+        ))
+
+        self.assertEqual(repository.written[0]["close_price"], Decimal("50.00"))
+        self.assertEqual(repository.written[0]["volume"], 1000)
+
+    def test_nse_raw_previous_close_does_not_auto_resolve_demerger(self):
+        bars = [
+            {"isin": "INE000000001", "trading_date": date(2020, 1, 1),
+             "open_price": Decimal("100"), "high_price": Decimal("100"),
+             "low_price": Decimal("100"), "close_price": Decimal("100"),
+             "volume": 1000, "raw_revision": 1},
+            {"isin": "INE000000001", "trading_date": date(2021, 1, 1),
+             "open_price": Decimal("61"), "high_price": Decimal("62"),
+             "low_price": Decimal("59"), "close_price": Decimal("60"),
+             "previous_close_price": Decimal("60"), "volume": 1000,
+             "raw_revision": 1},
+        ]
+        repository = AdjustmentRepository([{
+            "source_event_key": "NSE:demerger", "action_type": "DEMERGER",
+            "ex_date": date(2021, 1, 1),
+        }], bars)
+
+        with self.assertRaisesRegex(
+            CorporateActionAdjustmentError, "reviewed manual adjustment factor"
+        ):
+            AdjustmentService(repository).rebuild(AdjustmentRequest(
+                "INE000000001", date(2020, 1, 1), date(2021, 1, 1)
+            ))
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ class PatternEngineEnumTestCase(unittest.TestCase):
         self.assertEqual([item.value for item in SwingType], ["HIGH", "LOW"])
         self.assertEqual([item.value for item in ZoneType], ["RESISTANCE", "SUPPORT"])
         self.assertEqual([item.value for item in ImportJobType], [
-            "EQUITY_MASTER", "HISTORY_BACKFILL", "CORPORATE_ACTION_BACKFILL", "DAILY_DELTA",
+            "EQUITY_MASTER", "EQUITY_CLASSIFICATION", "HISTORY_BACKFILL", "CORPORATE_ACTION_BACKFILL", "DAILY_DELTA",
             "ADJUSTMENT_REBUILD", "FEATURE_REBUILD", "PATTERN_SCAN"
         ])
         self.assertEqual([item.value for item in ImportStatus], [

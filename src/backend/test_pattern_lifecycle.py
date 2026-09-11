@@ -164,6 +164,32 @@ class LifecycleTestCase(unittest.TestCase):
         self.assertEqual("121", event["new_values"]["pivot_price"])
         self.assertEqual(first.instance["id"], result.instance["id"])
 
+    def test_adjustment_rebase_invalidates_old_price_scale_before_new_detection(self):
+        old = self._apply(_candidate(PatternState.READY))
+
+        invalidated = self.service.invalidate_adjustment_mismatches(
+            _ISIN, "adjusted-v2", date(2026, 9, 2)
+        )
+        replacement = self.service.apply_candidate(
+            replace(
+                _candidate(PatternState.FORMING, detected=date(2026, 9, 2)),
+                pivot_price=_D("24"), support_price=_D("20"),
+                invalidation_price=_D("19.6"),
+            ),
+            engine_version="v1", feature_version="features-v1",
+            adjustment_version="adjusted-v2",
+        )
+
+        self.assertEqual(1, len(invalidated))
+        self.assertEqual(PatternState.INVALIDATED.value, invalidated[0].instance["state"])
+        self.assertEqual(date(2026, 9, 2), invalidated[0].instance["terminal_date"])
+        self.assertEqual(
+            "ADJUSTMENT_VERSION_CHANGED",
+            invalidated[0].instance["measurements"]["invalidation_reason"],
+        )
+        self.assertNotEqual(old.instance["id"], replacement.instance["id"])
+        self.assertEqual("adjusted-v2", replacement.instance["adjustment_version"])
+
     def test_confirmed_candidate_preserves_breakout_trigger_date(self):
         breakout_date = date(2026, 8, 29)
         candidate = replace(

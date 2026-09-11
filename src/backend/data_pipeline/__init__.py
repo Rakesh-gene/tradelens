@@ -1,6 +1,7 @@
 """Jobs that ingest external market data into TradeLens."""
 
 from .nse_data_collector import NseDataCollector
+from .nse_classification_collector import NseClassificationCollector
 from .history_backfill import BackfillRequest, BackfillRunResult, HistoryBackfillService
 from .daily_delta import DailyDeltaRequest, DailyDeltaRunResult, DailyDeltaService
 from .adjustments import AdjustmentRequest, AdjustmentResult, AdjustmentService
@@ -10,6 +11,7 @@ from .normalization import (
     NseDataValidationError,
     corporate_action_record,
     parse_corporate_actions_response,
+    parse_equity_classification_response,
     parse_equity_history_response,
     parse_index_history_response,
     raw_bar_record,
@@ -18,6 +20,7 @@ from .normalization import (
 __all__ = [
     "NseApiClient",
     "NseDataCollector",
+    "NseClassificationCollector",
     "BackfillRequest",
     "BackfillRunResult",
     "HistoryBackfillService",
@@ -33,6 +36,7 @@ __all__ = [
     "NseResponseError",
     "corporate_action_record",
     "parse_corporate_actions_response",
+    "parse_equity_classification_response",
     "parse_equity_history_response",
     "parse_index_history_response",
     "raw_bar_record",

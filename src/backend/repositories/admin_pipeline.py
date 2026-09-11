@@ -37,8 +37,22 @@ class PostgresAdminPipelineRepository:
         rows = self._fetch_all(
             """SELECT equity.isin, equity.symbol, equity.company_name, equity.series, equity.listed_on,
                       latest.latest_raw_date, recent.status AS last_pipeline_status,
-                      recent.finished_at AS last_pipeline_at
+                      recent.finished_at AS last_pipeline_at,
+                      classification.sector_code, classification.sector_name,
+                      classification.basic_industry_name,
+                      COALESCE(classification.status, 'MISSING') AS classification_status
                FROM nse_equities equity
+               LEFT JOIN LATERAL (
+                   SELECT membership.sector_code, sector.name AS sector_name,
+                          basic.name AS basic_industry_name, refresh.status
+                   FROM security_sector_memberships membership
+                   JOIN market_sectors sector ON sector.code = membership.sector_code
+                   LEFT JOIN security_industry_memberships sim ON sim.isin = equity.isin AND sim.effective_to IS NULL
+                   LEFT JOIN market_basic_industries basic ON basic.code = sim.basic_industry_code
+                   LEFT JOIN equity_classification_refresh_state refresh ON refresh.isin = equity.isin
+                   WHERE membership.isin = equity.isin AND membership.effective_to IS NULL
+                   ORDER BY membership.effective_from DESC LIMIT 1
+               ) classification ON TRUE
                LEFT JOIN LATERAL (
                    SELECT MAX(trading_date) AS latest_raw_date FROM nse_daily_bars_raw
                    WHERE isin = equity.isin
@@ -258,7 +272,14 @@ class PostgresAdminPipelineRepository:
         )
 
     def get_pipeline_run(self, run_id, item_page=1, item_page_size=25):
-        run = self._fetch_one("SELECT * FROM admin_pipeline_runs WHERE id = %s", (run_id,))
+        run = self._fetch_one(
+            """SELECT pipeline.*,
+                      (SELECT COUNT(1) FROM admin_pipeline_run_items item
+                       WHERE item.run_id = pipeline.id
+                         AND item.current_stage = 'SECTOR_CONTEXT') AS securities_prepared
+               FROM admin_pipeline_runs pipeline WHERE pipeline.id = %s""",
+            (run_id,),
+        )
         if run is None:
             return None
         run["items"] = self._fetch_all(

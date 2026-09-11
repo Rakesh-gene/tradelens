@@ -16,6 +16,7 @@ default_benchmark_securities = 100
 methodology_version = "v1"
 source_mode = "TRADELENS_REBUILT"
 cash_dividend_policy = "ignore"
+maximum_adjusted_ex_date_jump_pct = 35.0
 
 [swings]
 left_bars = 3

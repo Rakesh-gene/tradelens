@@ -2,8 +2,9 @@ import React from 'react'
 import NavigationLink from './NavigationLink.jsx'
 import SecuritySearch from './SecuritySearch.jsx'
 import SiteFooter from './SiteFooter.jsx'
+import LoginDisclaimer from './LoginDisclaimer.jsx'
 
-export default function AppShell({ children, user, onNavigate, onSignOut }) {
+export default function AppShell({ children, user, onNavigate, onSignOut, showLoginDisclaimer, onDismissLoginDisclaimer }) {
   const accountInitial = user?.email?.trim()?.charAt(0).toUpperCase() || 'U'
   return <div className="product-shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
@@ -11,6 +12,7 @@ export default function AppShell({ children, user, onNavigate, onSignOut }) {
       <NavigationLink className="brand-button" to="/overview" onNavigate={onNavigate} aria-label="TradeLens overview"><span className="brand-mark">TL</span><span><strong>Tradelens</strong><small>Position intelligence</small></span></NavigationLink>
       <nav className="app-nav" aria-label="Primary navigation">
         <NavigationLink to="/overview" onNavigate={onNavigate}>Overview</NavigationLink>
+        <NavigationLink to="/sector-rotation" onNavigate={onNavigate}>Sector rotation</NavigationLink>
         <NavigationLink to="/setups" onNavigate={onNavigate}>Setups</NavigationLink>
         {(user?.isAdmin || user?.is_admin) && <NavigationLink to="/admin/pipeline" onNavigate={onNavigate}>Pipeline</NavigationLink>}
       </nav>
@@ -26,6 +28,7 @@ export default function AppShell({ children, user, onNavigate, onSignOut }) {
           <span>Sign out</span>
         </button>
       </div>
+      {showLoginDisclaimer && <LoginDisclaimer onDismiss={onDismissLoginDisclaimer} />}
     </header>
     <main id="main-content" className="product-content">{children}</main>
     <SiteFooter />

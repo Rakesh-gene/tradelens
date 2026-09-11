@@ -10,12 +10,14 @@ import NavigationLink from '../components/NavigationLink.jsx'
 export default function OverviewPage({ onNavigate, onUnauthorized }) {
   useDocumentTitle('Overview')
   const resource = useApiResource('overview', (signal) => getOverview({ top: 6 }, { signal, onUnauthorized }))
-  return <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
+  return <>
+    <PageIntro title="Market overview" date={resource.data?.dataAsOf} />
+    <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
     {resource.data && <>
-      <PageIntro title="Market overview" date={resource.data.dataAsOf} />
       <section className="market-grid" aria-label="Market regime and lifecycle"><MarketRegimeCard market={resource.data.market} /><div className="state-counts">{Object.entries(resource.data.countsByState).map(([state, count]) => <NavigationLink key={state} to={`/setups?state=${state}`} onNavigate={onNavigate}><span>{state}</span><strong>{count}</strong><small>View setups →</small></NavigationLink>)}</div></section>
       <section className="section-heading"><div><h2>Highest-ranked setups</h2></div><NavigationLink className="secondary-button" to="/setups" onNavigate={onNavigate}>View all setups</NavigationLink></section>
       {resource.data.topSetups.length ? <div className="setup-grid">{resource.data.topSetups.map((setup) => <SetupCard key={setup.patternInstanceId} setup={setup} onNavigate={onNavigate} />)}</div> : <EmptyState title="No active opportunities" message="The latest completed scan did not find setups matching the overview states." />}
     </>}
-  </ResourceState>
+    </ResourceState>
+  </>
 }

@@ -120,6 +120,31 @@ class RecoveryService:
         return {"runId": f"pattern-{isin}", "status": "COMPLETED", "metrics": {"candidatesDetected": 3}}
 
 
+class StagedRecoveryService:
+    def __init__(self, events): self.events = events
+    def prepare_security(self, isin, from_date, to_date, versions):
+        self.events.append(("prepare", isin))
+        return {
+            "isin": isin, "fromDate": from_date, "toDate": to_date,
+            "asOf": to_date, "adjustmentVersion": versions.adjustment,
+            "versions": versions,
+        }
+    def scan_prepared_security(self, prepared):
+        self.events.append(("scan", prepared["isin"]))
+        return {
+            "runId": f"pattern-{prepared['isin']}", "status": "COMPLETED",
+            "metrics": {"candidatesDetected": 2},
+        }
+
+
+class SectorRepository:
+    def __init__(self, events, *, error=None): self.events = events; self.error = error
+    def refresh_sector_snapshots(self, as_of_date, feature_version):
+        self.events.append(("sector", as_of_date))
+        if self.error: raise self.error
+        return 1
+
+
 class EquityCollector:
     def __init__(self, repository, *, error=None):
         self.repository = repository
@@ -261,6 +286,41 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
 
         self.assertEqual("COMPLETED", result["run"]["status"])
         self.assertEqual(2, history.max_active)
+
+    def test_sector_context_is_materialized_after_all_features_and_before_scans(self):
+        events = []
+        repository = PipelineRepository()
+        service = AdminPipelineService(
+            repository, HistoryService(), StagedRecoveryService(events),
+            load_pattern_engine_configuration(), executor=lambda action: action(),
+            today=lambda: date(2026, 9, 5), max_workers=1,
+            sector_repository=SectorRepository(events),
+        )
+
+        result = service.start({"allEquities": True}, "admin-1")
+
+        self.assertEqual("COMPLETED", result["run"]["status"])
+        self.assertEqual(
+            ["prepare", "prepare", "sector", "scan", "scan"],
+            [event[0] for event in events],
+        )
+
+    def test_sector_context_failure_fails_prepared_items_without_scanning(self):
+        events = []
+        repository = PipelineRepository()
+        service = AdminPipelineService(
+            repository, HistoryService(), StagedRecoveryService(events),
+            load_pattern_engine_configuration(), executor=lambda action: action(),
+            today=lambda: date(2026, 9, 5), max_workers=1,
+            sector_repository=SectorRepository(events, error=RuntimeError("aggregation unavailable")),
+        )
+
+        result = service.start({"allEquities": True}, "admin-1")
+
+        self.assertEqual("FAILED", result["run"]["status"])
+        self.assertEqual(2, result["run"]["securitiesFailed"])
+        self.assertNotIn("scan", [event[0] for event in events])
+        self.assertTrue(all(item["status"] == "FAILED" for item in result["run"]["items"]))
 
     def test_run_all_rejects_selection_and_invalid_batch_size(self):
         service = self._service()

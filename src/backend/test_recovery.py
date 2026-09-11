@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from data_pipeline.adjustments import CorporateActionAdjustmentError
 from operations.recovery import RecoveryService
 from pattern_engine.runner import PatternEngineVersions
 
@@ -71,6 +72,37 @@ class RecoveryServiceTestCase(unittest.TestCase):
             )
 
         self.assertEqual("detector failure detail", result["failures"][0]["reason"])
+
+    def test_corporate_action_failure_invalidates_active_patterns(self):
+        market = SimpleNamespace(
+            get_raw_bar_date_range=lambda isin: (date(2026, 1, 1), date(2026, 9, 4)),
+        )
+        class Runner:
+            def __init__(self):
+                self.invalidations = []
+
+            def invalidate_security(self, isin, as_of_date, reason):
+                self.invalidations.append((isin, as_of_date, reason))
+
+        runner = Runner()
+        configuration = SimpleNamespace(section=lambda name: {
+            "cash_dividend_policy": "ignore", "source_mode": "TRADELENS_REBUILT",
+            "maximum_adjusted_ex_date_jump_pct": 35,
+        })
+
+        with patch("operations.recovery.AdjustmentService") as adjustments:
+            adjustments.return_value.rebuild.side_effect = CorporateActionAdjustmentError(
+                "unresolved demerger"
+            )
+            with self.assertRaisesRegex(CorporateActionAdjustmentError, "unresolved demerger"):
+                RecoveryService(market, runner, configuration).rebuild_security(
+                    "INE002A01018", date(2026, 1, 1), date(2026, 9, 4),
+                    PatternEngineVersions("v1", "v1", "v1"),
+                )
+
+        self.assertEqual("INE002A01018", runner.invalidations[0][0])
+        self.assertEqual(date(2026, 9, 4), runner.invalidations[0][1])
+        self.assertIn("CORPORATE_ACTION_DATA_QUALITY", runner.invalidations[0][2])
 
 
 if __name__ == "__main__":

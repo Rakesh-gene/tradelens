@@ -57,8 +57,11 @@ class PostgresResearchRepository:
 
     def list_trading_sessions(self, from_date, to_date, adjustment_version):
         rows = self._fetch_all(
-            "SELECT DISTINCT trading_date FROM adjusted_daily_bars WHERE trading_date BETWEEN %s AND %s AND adjustment_version = %s ORDER BY trading_date",
-            (from_date, to_date, adjustment_version),
+            """SELECT DISTINCT trading_date FROM adjusted_daily_bars
+               WHERE trading_date BETWEEN %s AND %s
+                 AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%')
+               ORDER BY trading_date""",
+            (from_date, to_date, adjustment_version, adjustment_version),
         )
         return [row["trading_date"] for row in rows]
 
@@ -86,11 +89,25 @@ class PostgresResearchRepository:
 
     def load_outcome_bars(self, isin, entry_date, adjustment_version, limit):
         return self._fetch_all(
-            """SELECT trading_date, high_price, low_price, close_price
+            """WITH selected_version AS (
+                   SELECT adjustment_version
+                   FROM adjusted_daily_bars
+                   WHERE isin = %s
+                     AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%')
+                   GROUP BY adjustment_version
+                   ORDER BY CASE WHEN adjustment_version = %s THEN 0 ELSE 1 END,
+                            MAX(generated_at) DESC
+                   LIMIT 1
+               )
+               SELECT trading_date, high_price, low_price, close_price
                FROM adjusted_daily_bars
-               WHERE isin = %s AND trading_date >= %s AND adjustment_version = %s
+               WHERE isin = %s AND trading_date >= %s
+                 AND adjustment_version = (SELECT adjustment_version FROM selected_version)
                ORDER BY trading_date LIMIT %s""",
-            (isin, entry_date, adjustment_version, limit),
+            (
+                isin, adjustment_version, adjustment_version, adjustment_version,
+                isin, entry_date, limit,
+            ),
         )
 
     def insert_entry_with_outcome(self, run_id, entry, outcome):

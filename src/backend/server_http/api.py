@@ -130,7 +130,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_pattern_path(path):
-        if path in {"/api/overview", "/api/setups", "/api/securities/search"}:
+        if path in {"/api/overview", "/api/setups", "/api/securities/search", "/api/sectors/rotation", "/api/sectors/stocks"}:
             return True
         parts = path.strip("/").split("/")
         return (
@@ -143,6 +143,10 @@ class ApiHandler(BaseHTTPRequestHandler):
         )
 
     def _pattern_get(self, path, query):
+        if path == "/api/sectors/rotation":
+            return self.pattern_service.sector_rotation(query)
+        if path == "/api/sectors/stocks":
+            return self.pattern_service.sector_stocks(query)
         if path == "/api/overview":
             return self.pattern_service.overview(query)
         if path == "/api/setups":

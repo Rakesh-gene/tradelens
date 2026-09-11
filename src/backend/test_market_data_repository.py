@@ -128,6 +128,39 @@ class MarketDataMigrationTestCase(unittest.TestCase):
                 "ADD COLUMN IF NOT EXISTS source_isin TEXT",
                 "nse_daily_bars_raw_source_isin_idx",
             ],
+            "023_create_industry_classification.sql": [
+                "CREATE TABLE IF NOT EXISTS market_macro_sectors",
+                "CREATE TABLE IF NOT EXISTS market_industries",
+                "CREATE TABLE IF NOT EXISTS market_basic_industries",
+                "CREATE TABLE IF NOT EXISTS security_industry_memberships",
+                "effective_from DATE NOT NULL",
+                "CREATE TABLE IF NOT EXISTS equity_classification_refresh_state",
+                "CREATE TABLE IF NOT EXISTS sector_daily_snapshots",
+            ],
+            "024_correct_nse_classification_source.sql": [
+                "ALTER COLUMN taxonomy_source SET DEFAULT 'NSE'",
+                "WHERE code LIKE 'NSE-SECTOR-%'",
+            ],
+            "025_backfill_face_value_action_ratios.sql": [
+                "action_type IN ('SPLIT', 'CONSOLIDATION')",
+                "SET numerator = parsed.new_face_value",
+                "denominator = parsed.old_face_value",
+            ],
+            "026_harden_corporate_action_adjustments.sql": [
+                "ADD COLUMN IF NOT EXISTS issue_price NUMERIC",
+                "ADD COLUMN IF NOT EXISTS manual_price_factor NUMERIC",
+                "SET action_type = CASE",
+                "NON_EQUITY_DISTRIBUTION",
+            ],
+            "027_store_nse_adjusted_previous_close.sql": [
+                "ADD COLUMN IF NOT EXISTS previous_close_price NUMERIC",
+                "nse_daily_bars_raw_action_reference_idx",
+            ],
+            "028_repair_rights_issue_prices.sql": [
+                "An explicitly stated issue price",
+                "(?:premium|prem)",
+                "COALESCE(face_value, 0)",
+            ],
         }
 
         for filename, required_fragments in expected.items():
@@ -386,6 +419,18 @@ class PostgresMarketDataRepositoryTestCase(unittest.TestCase):
         statement, parameters = self.cursor.executed[0]
         self.assertIn("%s::timestamptz IS NULL", statement)
         self.assertIsNone(parameters[3])
+
+    def test_unresolved_actions_collapse_economic_duplicates(self) -> None:
+        self.cursor = RecordingCursor(rows=[], columns=[])
+        self.connection = RecordingConnection(self.cursor)
+        self.repository._connect = lambda: self.connection
+
+        self.repository.list_unresolved_corporate_actions(25)
+
+        statement, parameters = self.cursor.executed[0]
+        self.assertIn("ROW_NUMBER() OVER", statement)
+        self.assertIn("economic_duplicate_rank = 1", statement)
+        self.assertEqual((25,), parameters)
 
 
 if __name__ == "__main__":

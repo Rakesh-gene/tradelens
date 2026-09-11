@@ -55,6 +55,8 @@ class PatternQueryServiceTestCase(unittest.TestCase):
     def test_setups_validates_filters_and_uses_repeated_states(self):
         payload = self.service.setups({"asOf": [_DATE.isoformat()], "state": ["READY", "CONFIRMED"], "minSetupScore": ["80"], "pageSize": ["10"]})
         self.assertEqual(["p1"], [item["patternInstanceId"] for item in payload["items"]])
+        self.assertEqual(1, payload["totalCount"])
+        self.assertEqual(0, payload["remainingCount"])
         with self.assertRaisesRegex(ValueError, "Invalid patternClass"):
             self.service.setups({"patternClass": ["UNKNOWN"]})
         with self.assertRaisesRegex(ValueError, "between 0 and 100"):
@@ -146,6 +148,11 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "range must be"):
             self.service.chart("p1", {"range": ["forever"]})
 
+        ten_year = self.service.chart("p1", {"range": ["10y"]})
+        legacy_max = self.service.chart("p1", {"range": ["max"]})
+        self.assertEqual("10y", ten_year["range"])
+        self.assertEqual("10y", legacy_max["range"])
+
         security_chart = self.service.security_chart("INE000000001", {"asOf": [_DATE.isoformat()], "range": ["6m"]})
         self.assertTrue(security_chart["adjusted"])
         self.assertEqual("av1", security_chart["adjustmentVersion"])
@@ -221,6 +228,7 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
         self.assertIn("selected_setups AS", statement)
         self.assertIn("PARTITION BY p.state", statement)
         self.assertIn("best_fit_score", statement)
+        self.assertIn("COUNT(*) OVER () AS total_count", statement)
         self.assertLess(statement.index("selected_setups AS"), statement.index("LEFT JOIN LATERAL"))
 
     def test_overview_indexes_are_an_append_only_migration(self):

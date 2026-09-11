@@ -119,6 +119,11 @@ class PatternEngineRunner:
             dry_run=dry_run, initiated_by=initiated_by,
         )
 
+    def invalidate_security(self, isin: str, as_of_date: date, reason: str) -> int:
+        with self._patterns.security_transaction(isin) as repository:
+            lifecycle = PatternLifecycleService(repository, self._configuration)
+            return len(lifecycle.invalidate_active(isin, as_of_date, reason))
+
     def run_changed(
         self, source_run_id: str, versions: PatternEngineVersions,
         *, as_of_date: date | None = None, dry_run: bool = False,
@@ -263,6 +268,19 @@ class PatternEngineRunner:
             (row for row in self._data.load_adjusted_bars(isin, from_date, as_of, versions.adjustment) if _row_date(row) <= as_of),
             key=_row_date,
         )
+        if not bars and ":" not in versions.adjustment:
+            resolver = getattr(self._data, "resolve_adjustment_version", None)
+            resolved = resolver(isin, as_of, versions.adjustment) if resolver else None
+            if resolved:
+                versions = PatternEngineVersions(
+                    versions.engine, versions.feature, resolved
+                )
+                bars = sorted(
+                    (row for row in self._data.load_adjusted_bars(
+                        isin, from_date, as_of, resolved
+                    ) if _row_date(row) <= as_of),
+                    key=_row_date,
+                )
         features = sorted(
             (row for row in self._data.load_technical_features(isin, from_date, as_of, versions.feature) if _row_date(row) <= as_of),
             key=_row_date,
@@ -290,6 +308,16 @@ class PatternEngineRunner:
         transaction = nullcontext(self._patterns) if dry_run else self._patterns.security_transaction(isin)
         with transaction as repository:
             lifecycle = PatternLifecycleService(repository, self._configuration)
+            if not dry_run:
+                rebased = lifecycle.invalidate_adjustment_mismatches(
+                    isin, versions.adjustment, as_of
+                )
+                updated += len(rebased)
+                emitted += len(rebased)
+                decisions.append({
+                    "stage": "adjustment_rebase",
+                    "invalidated": len(rebased),
+                })
             # Historical/dry evaluation must not leak today's live instances
             # into a replay date. Same-session bases are added below.
             active = [] if dry_run else _normalize_instances(repository.load_active_patterns(isin))

@@ -1,0 +1,15 @@
+{
+  "equityResponse": [{
+    "metaData": {
+      "symbol": "RELIANCE",
+      "companyName": "Reliance Industries Limited",
+      "isinCode": "INE002A01018"
+    },
+    "secInfo": {
+      "macro": "Energy",
+      "sector": "Oil Gas & Consumable Fuels",
+      "industryInfo": "Petroleum Products",
+      "basicIndustry": "Refineries & Marketing"
+    }
+  }]
+}

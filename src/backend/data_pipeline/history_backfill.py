@@ -15,7 +15,6 @@ from repositories.market_data import MarketDataRepository
 
 ELIGIBLE_SERIES = frozenset({"EQ"})
 LONG_GAP_DAYS = 7
-ACTION_REPAIR_DAYS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,44 +230,32 @@ class HistoryBackfillService:
         action_checkpoint = self._repository.get_import_checkpoint(
             ImportJobType.CORPORATE_ACTION_BACKFILL, result.isin
         )
-        if not self._checkpoint_covers(action_checkpoint, result.requested_from_date, result.requested_to_date):
-            action_from = self._action_refresh_start(
+        # NSE responses are cached by aligned date window in NseApiClient, so a
+        # universe run can cheaply re-audit the full action history. This is
+        # necessary because issuers may revise old corporate-action notices.
+        action_from = result.requested_from_date
+        actions = self._nse_client.fetch_corporate_actions(
+            result.symbol, action_from, result.requested_to_date
+        )
+        mapped_actions = [
+            corporate_action_record(
+                action, result.isin, run_id, expected_symbol=result.symbol
+            )
+            for action in actions
+        ]
+        result.actions_inserted = self._repository.upsert_corporate_actions(mapped_actions)
+        self._repository.upsert_import_checkpoint(self._successful_checkpoint(
+            ImportJobType.CORPORATE_ACTION_BACKFILL,
+            result.isin,
+            self._continuous_coverage_start(
                 action_checkpoint, result.requested_from_date
-            )
-            actions = self._nse_client.fetch_corporate_actions(
-                result.symbol, action_from, result.requested_to_date
-            )
-            mapped_actions = [
-                corporate_action_record(
-                    action, result.isin, run_id, expected_symbol=result.symbol
-                )
-                for action in actions
-            ]
-            result.actions_inserted = self._repository.upsert_corporate_actions(mapped_actions)
-            self._repository.upsert_import_checkpoint(self._successful_checkpoint(
-                ImportJobType.CORPORATE_ACTION_BACKFILL,
-                result.isin,
-                self._continuous_coverage_start(
-                    action_checkpoint, result.requested_from_date
-                ),
-                result.requested_to_date,
-                (),
-                run_id,
-            ))
+            ),
+            result.requested_to_date,
+            (),
+            run_id,
+        ))
         if all_dates:
             self._report_long_gaps(result, sorted(set(all_dates)))
-
-    @staticmethod
-    def _action_refresh_start(
-        checkpoint: Mapping[str, object] | None, requested_from: date
-    ) -> date:
-        """Use a short overlap to catch recent NSE action corrections."""
-
-        if checkpoint and checkpoint.get("status") == ImportStatus.COMPLETED.value:
-            attempted_to = checkpoint.get("last_attempted_to_date")
-            if isinstance(attempted_to, date):
-                return max(requested_from, attempted_to - timedelta(days=ACTION_REPAIR_DAYS))
-        return requested_from
 
     @staticmethod
     def _continuous_coverage_start(

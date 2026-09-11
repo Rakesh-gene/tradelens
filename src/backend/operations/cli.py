@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+from decimal import Decimal, InvalidOperation
 import json
 import os
 from typing import Sequence
@@ -33,6 +34,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     coverage.add_argument("--limit", type=int, default=5000); coverage.add_argument("--no-persist", action="store_true")
     lineage = commands.add_parser("lineage", help="Trace a pattern to adjusted bars, actions, features, and versions")
     lineage.add_argument("--pattern-id", required=True)
+    resolve_action = commands.add_parser(
+        "resolve-corporate-action",
+        help="Record reviewed price/volume factors for a non-deterministic action",
+    )
+    resolve_action.add_argument("--source-event-key", required=True)
+    resolve_action.add_argument("--price-factor", required=True, type=_positive_decimal)
+    resolve_action.add_argument("--volume-factor", default=Decimal("1"), type=_positive_decimal)
+    resolve_action.add_argument("--note", required=True)
+    unresolved_actions = commands.add_parser(
+        "unresolved-corporate-actions",
+        help="List material actions waiting for complete terms or reviewed factors",
+    )
+    unresolved_actions.add_argument("--limit", type=int, default=500)
     plan = commands.add_parser("import-plan", help="Print a read-only ten-year history import plan")
     plan.add_argument("--from-date", type=_date); plan.add_argument("--to-date", type=_date)
     plan.add_argument("--years", type=int, default=10); plan.add_argument("--isin"); plan.add_argument("--symbol"); plan.add_argument("--max-securities", type=int)
@@ -52,6 +66,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "status": result = dependencies["monitor"].status()
         elif args.command == "lineage": result = dependencies["monitor"].lineage(args.pattern_id)
+        elif args.command == "resolve-corporate-action":
+            if not args.note.strip():
+                raise ValueError("--note must not be blank")
+            result = dependencies["market"].resolve_corporate_action(
+                args.source_event_key, args.price_factor, args.volume_factor,
+                args.note.strip(),
+            )
+        elif args.command == "unresolved-corporate-actions":
+            result = {
+                "items": dependencies["market"].list_unresolved_corporate_actions(
+                    max(1, min(args.limit, 5000))
+                )
+            }
         elif args.command == "validate-coverage": result = dependencies["monitor"].validate_coverage(args.from_date, args.to_date, limit=args.limit, persist=not args.no_persist)
         elif args.command == "import-plan": result = _import_plan(args, dependencies["market"])
         elif args.command == "rebuild-security": result = dependencies["recovery"].rebuild_security(args.isin, args.from_date, args.to_date, _versions(args), dry_run=args.dry_run)
@@ -106,6 +133,11 @@ def _json_object(value):
 def _date(value):
     try: return date.fromisoformat(value)
     except ValueError as exc: raise argparse.ArgumentTypeError("Dates must use YYYY-MM-DD") from exc
+def _positive_decimal(value):
+    try: parsed = Decimal(value)
+    except (InvalidOperation, ValueError) as exc: raise argparse.ArgumentTypeError("factor must be a number") from exc
+    if parsed <= 0: raise argparse.ArgumentTypeError("factor must be positive")
+    return parsed
 def _years_before(value, years):
     if years <= 0: raise ValueError("--years must be positive")
     try: return value.replace(year=value.year - years)

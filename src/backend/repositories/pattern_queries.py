@@ -13,6 +13,7 @@ except ModuleNotFoundError:  # pragma: no cover
     psycopg = None
 
 from repositories.migrations import MigrationRunner
+from repositories.sector_rotation import SectorRotationQueries, MemorySectorRotationQueries
 
 
 _SORT_COLUMNS = {
@@ -25,7 +26,7 @@ _SORT_COLUMNS = {
 }
 
 
-class PostgresPatternQueryRepository:
+class PostgresPatternQueryRepository(SectorRotationQueries):
     def __init__(self, dsn: str, *, apply_migrations: bool = True) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg is required for PostgreSQL support")
@@ -41,17 +42,30 @@ class PostgresPatternQueryRepository:
         prefix = f"{text}%"
         return self._fetch_all(
             """
-            SELECT isin, symbol, company_name
-            FROM nse_equities
-            WHERE series = 'EQ'
-              AND (symbol ILIKE %s OR company_name ILIKE %s)
+            SELECT equity.isin, equity.symbol, equity.company_name,
+                   sector.sector_code, sector.sector_name,
+                   sector.basic_industry_name
+            FROM nse_equities equity
+            LEFT JOIN LATERAL (
+                SELECT membership.sector_code, sectors.name AS sector_name,
+                       basic.name AS basic_industry_name
+                FROM security_sector_memberships membership
+                JOIN market_sectors sectors ON sectors.code = membership.sector_code
+                LEFT JOIN security_industry_memberships sim ON sim.isin = membership.isin
+                  AND sim.effective_to IS NULL
+                LEFT JOIN market_basic_industries basic ON basic.code = sim.basic_industry_code
+                WHERE membership.isin = equity.isin AND membership.effective_to IS NULL
+                ORDER BY membership.effective_from DESC LIMIT 1
+            ) sector ON TRUE
+            WHERE equity.series = 'EQ'
+              AND (equity.symbol ILIKE %s OR equity.company_name ILIKE %s)
             ORDER BY CASE
                        WHEN UPPER(symbol) = UPPER(%s) THEN 0
                        WHEN symbol ILIKE %s THEN 1
                        WHEN company_name ILIKE %s THEN 2
                        ELSE 3
                      END,
-                     symbol, isin
+                     equity.symbol, equity.isin
             LIMIT %s
             """,
             (prefix, prefix, text, prefix, prefix, limit),
@@ -148,7 +162,8 @@ class PostgresPatternQueryRepository:
                        ROUND((PERCENT_RANK() OVER (
                            PARTITION BY p.state ORDER BY p.best_fit_score ASC
                        ) * 100)::numeric, 1) AS best_fit_percentile,
-                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count
+                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count,
+                       COUNT(*) OVER () AS total_count
                 FROM best_fit_pool p
             )
             SELECT * FROM ranked_best_fit
@@ -192,7 +207,8 @@ class PostgresPatternQueryRepository:
                        ROUND((PERCENT_RANK() OVER (
                            PARTITION BY p.state ORDER BY p.best_fit_score ASC
                        ) * 100)::numeric, 1) AS best_fit_percentile,
-                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count
+                       COUNT(*) OVER (PARTITION BY p.state) AS state_candidate_count,
+                       COUNT(*) OVER () AS total_count
                 FROM best_fit_pool p
             ), selected_setups AS (
                 SELECT * FROM ranked_best_fit
@@ -370,14 +386,34 @@ class PostgresPatternQueryRepository:
         return self._fetch_one(
             """
             SELECT equity.isin, equity.symbol, equity.company_name,
-                   membership.sector_code, sectors.name AS sector_name
+                   membership.sector_code, sectors.name AS sector_name,
+                   macro.code AS macro_sector_code, macro.name AS macro_sector_name,
+                   industry.code AS industry_code, industry.name AS industry_name,
+                   basic.code AS basic_industry_code, basic.name AS basic_industry_name,
+                   COALESCE(refresh.status, 'MISSING') AS classification_status,
+                   snapshot.trading_date AS sector_snapshot_date,
+                   snapshot.sector_strength_score, snapshot.coverage_pct,
+                   snapshot.above_ema20_pct, snapshot.above_sma50_pct,
+                   snapshot.above_sma200_pct, snapshot.median_relative_strength
             FROM nse_equities equity
             LEFT JOIN security_sector_memberships membership ON membership.isin = equity.isin
               AND membership.effective_from <= %s
               AND (membership.effective_to IS NULL OR membership.effective_to >= %s)
             LEFT JOIN market_sectors sectors ON sectors.code = membership.sector_code
+            LEFT JOIN market_macro_sectors macro ON macro.code = sectors.macro_sector_code
+            LEFT JOIN security_industry_memberships sim ON sim.isin = equity.isin
+              AND sim.effective_from <= %s
+              AND (sim.effective_to IS NULL OR sim.effective_to >= %s)
+            LEFT JOIN market_basic_industries basic ON basic.code = sim.basic_industry_code
+            LEFT JOIN market_industries industry ON industry.code = basic.industry_code
+            LEFT JOIN equity_classification_refresh_state refresh ON refresh.isin = equity.isin
+            LEFT JOIN LATERAL (
+                SELECT daily.* FROM sector_daily_snapshots daily
+                WHERE daily.sector_code = membership.sector_code AND daily.trading_date <= %s
+                ORDER BY daily.trading_date DESC, daily.generated_at DESC LIMIT 1
+            ) snapshot ON TRUE
             WHERE equity.isin = %s ORDER BY membership.effective_from DESC LIMIT 1
-            """, (as_of, as_of, isin),
+            """, (as_of, as_of, as_of, as_of, as_of, isin),
         )
 
     def get_latest_feature(self, isin, as_of):
@@ -450,7 +486,7 @@ class PostgresPatternQueryRepository:
         return [dict(row) if isinstance(row, Mapping) else dict(zip(columns, row)) for row in rows]
 
 
-class InMemoryPatternQueryRepository:
+class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
     """Small contract-compatible query store for HTTP and service tests."""
 
     def __init__(self, patterns=(), events=(), securities=(), features=(), bars=(), run=None, actions=()):
@@ -522,6 +558,8 @@ class InMemoryPatternQueryRepository:
         reverse = filters["direction"] == "desc"
         field = {"bestFit": "best_fit_score", "setupScore": "setup_score", "qualityScore": "quality_score", "maturityScore": "maturity_score", "detectedDate": "detected_date", "distanceToPivotPct": "distance_to_pivot_pct"}[filters["sort"]]
         rows.sort(key=lambda row: (row.get(field) is not None, row.get(field), str(row.get("id"))), reverse=reverse)
+        for row in rows:
+            row["total_count"] = len(rows)
         return rows[offset:offset + limit + 1]
 
     def setup_facets(self, as_of):

@@ -42,6 +42,7 @@ class NseEquityHistoryRecord:
     delivery_percentage: Decimal | None
     source_checksum: str
     source_payload: Mapping[str, JsonValue]
+    previous_close_price: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,10 @@ class NseCorporateActionRecord:
     raw_description: str
     source_checksum: str
     source_payload: Mapping[str, JsonValue]
+    face_value: Decimal | None = None
+    issue_price: Decimal | None = None
+    old_face_value: Decimal | None = None
+    new_face_value: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,5 +80,19 @@ class NseIndexHistoryRecord:
     low_price: Decimal
     close_price: Decimal
     volume: int | None
+    source_checksum: str
+    source_payload: Mapping[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class NseEquityClassification:
+    """Validated NSE four-level industry classification for one equity."""
+
+    symbol: str
+    isin: str
+    macro_sector: str
+    sector: str
+    industry: str
+    basic_industry: str
     source_checksum: str
     source_payload: Mapping[str, JsonValue]

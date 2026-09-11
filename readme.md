@@ -1,4 +1,4 @@
-﻿# TradeLens
+# TradeLens
 
 This repository contains a Vite-powered React frontend and a Python backend.
 
@@ -42,3 +42,42 @@ With PostgreSQL running, start or restart both services from the repository root
 
 The script starts the backend on port 9004 and Vite on port 5004, and writes
 their output to `backend.log` and `frontend.log`.
+
+### Public access through Cloudflare Tunnel
+
+The existing `tradelens` Cloudflare Tunnel serves
+`https://tradelens.othla.in` from Vite on port 5004. Its connector token stays
+outside this repository.
+
+In the Cloudflare Zero Trust dashboard, configure the `tradelens` tunnel's
+Public Hostname as `tradelens.othla.in` with service type `HTTP` and URL
+`localhost:5004`. The tunnel's current remote rule is for `othla.in`, which
+returns a 404 for the TradeLens subdomain.
+
+Start the local services first, then run the tunnel from the repository root:
+
+```powershell
+.\start-tunnel.ps1
+```
+
+Use the following command to restart TradeLens before connecting the tunnel:
+
+```powershell
+.\start-tunnel.ps1 -RestartServices
+```
+
+Run this variant once after pulling the Vite hostname allow-list change, so the
+running frontend reloads its configuration.
+
+To validate the local application and Cloudflare tunnel registration without
+opening a connector:
+
+```powershell
+.\start-tunnel.ps1 -ValidateOnly
+```
+
+The launcher verifies the frontend and API, obtains the connector token only at
+runtime, and runs the TradeLens connector in the current PowerShell window.
+Press `Ctrl+C` to stop it. It deliberately leaves the existing `cloudflared`
+Windows service untouched because that service currently operates the separate
+AlgoOptions tunnel.

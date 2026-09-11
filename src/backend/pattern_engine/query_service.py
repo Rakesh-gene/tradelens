@@ -15,6 +15,8 @@ from pattern_engine.models import serialize_value
 
 
 class PatternQueryRepository(Protocol):
+    def sector_rotation_rows(self, as_of): ...
+    def sector_strength_stocks(self, as_of, sector, limit, offset): ...
     def search_securities(self, query, limit): ...
     def list_setups(self, filters, limit, offset): ...
     def setup_facets(self, as_of): ...
@@ -34,6 +36,29 @@ class PatternQueryRepository(Protocol):
 class PatternQueryService:
     def __init__(self, repository: PatternQueryRepository) -> None:
         self._repository = repository
+
+    def sector_rotation(self, query):
+        from pattern_engine.sector_rotation import rotation_payload
+        as_of = _optional_date(_one(query, "asOf")) or date.today()
+        return rotation_payload(self._repository.sector_rotation_rows(as_of))
+
+    def sector_stocks(self, query):
+        as_of = _optional_date(_one(query, "asOf"))
+        sector = _one(query, "sector")
+        if not as_of or not sector or len(sector) > 100:
+            raise ValueError("sector and asOf are required")
+        limit = _integer(_one(query, "pageSize"), 25, 1, 100, "pageSize")
+        offset = _decode_cursor(_one(query, "cursor"))
+        rows = self._repository.sector_strength_stocks(as_of, sector, limit, offset)
+        return {"dataAsOf": as_of, "generatedAt": datetime.now(timezone.utc),
+                "engineVersion": "sector-rotation-v1", "configurationVersion": "sector-rotation-v1",
+                "isStale": (date.today() - as_of).days > 3,
+                "items": [{"security": _security(row), "rank": row["rank"] if row.get("relative_strength_3m") is not None else None,
+                           "rs3m": row.get("relative_strength_3m"), "rs1m": row.get("relative_strength_1m"),
+                           "rs6m": row.get("relative_strength_6m"), "rs12m": row.get("relative_strength_12m"),
+                           "featureVersion": row.get("feature_version"), "adjustmentVersion": row.get("data_version")}
+                          for row in rows[:limit]],
+                "nextCursor": _encode_cursor(offset + limit) if len(rows) > limit else None}
 
     def overview(self, query):
         as_of = _optional_date(_one(query, "asOf"))
@@ -91,6 +116,7 @@ class PatternQueryService:
         offset = _decode_cursor(_one(query, "cursor"))
         rows = self._repository.list_setups(filters, page_size, offset)
         has_more = len(rows) > page_size
+        total_count = int(rows[0].get("total_count") or 0) if rows else 0
         facets = self._repository.setup_facets(filters["as_of"])
         observed_types = {
             str(item.get("value")): int(item.get("count") or 0)
@@ -103,6 +129,8 @@ class PatternQueryService:
         return {
             "dataAsOf": filters["as_of"],
             "items": [_setup(row) for row in rows[:page_size]],
+            "totalCount": total_count,
+            "remainingCount": max(0, total_count - offset - page_size),
             "nextCursor": _encode_cursor(offset + page_size) if has_more else None,
             "facets": facets,
             "ranking": {
@@ -142,7 +170,7 @@ class PatternQueryService:
         adjustment_version = row.get("adjustment_version")
         window = _chart_window(_one(query, "range"))
         as_of = row.get("last_updated_date")
-        start_date = None if window == "max" else as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
+        start_date = as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
         evidence = self._repository.list_security_patterns(row["isin"], row["last_updated_date"])
         actions = self._repository.list_chart_actions(row["isin"], as_of, start_date)
         bars = [] if not adjustment_version else self._repository.list_chart_bars(
@@ -174,7 +202,7 @@ class PatternQueryService:
         if security is None:
             raise LookupError("Security not found")
         window = _chart_window(_one(query, "range"))
-        start_date = None if window == "max" else as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
+        start_date = as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
         evidence = self._repository.list_security_patterns(isin, as_of)
         actions = self._repository.list_chart_actions(isin, as_of, start_date)
         adjustment_version = self._repository.get_latest_adjustment_version(isin, as_of)
@@ -217,6 +245,20 @@ class PatternQueryService:
         supporting = lambda kind: [_setup(row) for row in active if row.get("pattern_class") == kind]
         return {
             "security": _security(security), "dataAsOf": feature.get("trading_date") or as_of,
+            "classification": {
+                "status": security.get("classification_status") or "MISSING",
+                "macroSector": {"code": security.get("macro_sector_code"), "name": security.get("macro_sector_name")},
+                "sector": {"code": security.get("sector_code"), "name": security.get("sector_name")},
+                "industry": {"code": security.get("industry_code"), "name": security.get("industry_name")},
+                "basicIndustry": {"code": security.get("basic_industry_code"), "name": security.get("basic_industry_name")},
+                "source": "NSE", "asOf": as_of,
+            },
+            "sectorStrength": {key: security.get(value) for key, value in {
+                "score": "sector_strength_score", "coveragePct": "coverage_pct",
+                "aboveEma20Pct": "above_ema20_pct", "aboveSma50Pct": "above_sma50_pct",
+                "aboveSma200Pct": "above_sma200_pct", "medianRelativeStrength": "median_relative_strength",
+                "asOf": "sector_snapshot_date",
+            }.items()},
             "trend": {
                 "close": feature.get("close_price"), "ema20": feature.get("ema_20"),
                 "sma50": feature.get("sma_50"), "sma200": feature.get("sma_200"),
@@ -292,13 +334,15 @@ def _default_filters(as_of):
     return {"as_of": as_of, "pattern_class": None, "pattern_type": None, "variant": None, "states": _ACTIVE_OPPORTUNITY_STATES, "sector": None, "min_setup_score": None, "max_setup_score": None, "min_rs6m": None, "min_liquidity_score": None, "sort": "bestFit", "direction": "desc"}
 
 
-_CHART_WINDOW_DAYS = {"3m": 92, "6m": 184, "1y": 365, "5y": 1826}
+_CHART_WINDOW_DAYS = {"3m": 92, "6m": 184, "1y": 365, "5y": 1826, "10y": 3653}
 
 
 def _chart_window(value):
     window = value or "6m"
-    if window not in {*_CHART_WINDOW_DAYS, "max"}:
-        raise ValueError("range must be one of 3m, 6m, 1y, 5y, or max")
+    if window == "max":  # compatibility for previously bookmarked chart URLs
+        return "10y"
+    if window not in _CHART_WINDOW_DAYS:
+        raise ValueError("range must be one of 3m, 6m, 1y, 5y, or 10y")
     return window
 
 
@@ -391,7 +435,7 @@ def _chart_action(row):
 
 
 def _security(row):
-    return {"isin": row.get("isin"), "symbol": row.get("symbol"), "name": row.get("company_name"), "sectorId": row.get("sector_code"), "sectorName": row.get("sector_name")}
+    return {"isin": row.get("isin"), "symbol": row.get("symbol"), "name": row.get("company_name"), "sectorId": row.get("sector_code"), "sectorName": row.get("sector_name"), "basicIndustryName": row.get("basic_industry_name")}
 
 
 def _one(query, name): return query.get(name, [None])[-1]

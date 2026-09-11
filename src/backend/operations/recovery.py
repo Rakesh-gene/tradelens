@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from time import perf_counter
 
-from data_pipeline.adjustments import AdjustmentRequest, AdjustmentService
+from data_pipeline.adjustments import (
+    AdjustmentRequest, AdjustmentService, CorporateActionAdjustmentError,
+)
 from pattern_engine.features import FeatureService
 from pattern_engine.runner import PatternEngineVersions
 from pattern_engine.swings import SwingZoneService
@@ -22,6 +25,14 @@ class RecoveryService:
         if from_date > to_date: raise ValueError("from_date cannot be after to_date")
         if dry_run:
             return {"isin": isin, "fromDate": from_date, "toDate": to_date, "versions": versions, "dryRun": True}
+        prepared = self.prepare_security(isin, from_date, to_date, versions)
+        return self.scan_prepared_security(prepared)
+
+    def prepare_security(self, isin, from_date, to_date, versions):
+        """Rebuild derived data without scanning, enabling a universe context barrier."""
+
+        if from_date > to_date:
+            raise ValueError("from_date cannot be after to_date")
         _, latest_raw_date = self._market.get_raw_bar_date_range(isin)
         if latest_raw_date is None:
             raise ValueError("No imported trading bars are available for this security")
@@ -30,11 +41,23 @@ class RecoveryService:
             raise ValueError("No imported trading bars are available within the requested range")
         started = perf_counter()
         settings = self._configuration.section("adjustments")
-        adjusted = AdjustmentService(self._market).rebuild(AdjustmentRequest(
-            isin, from_date, effective_to_date, versions.adjustment,
-            cash_dividend_policy=str(settings["cash_dividend_policy"]),
-            source_mode=str(settings["source_mode"]),
-        ))
+        try:
+            adjusted = AdjustmentService(self._market).rebuild(AdjustmentRequest(
+                isin, from_date, effective_to_date, versions.adjustment,
+                cash_dividend_policy=str(settings["cash_dividend_policy"]),
+                source_mode=str(settings["source_mode"]),
+                maximum_ex_date_jump_pct=Decimal(str(
+                    settings.get("maximum_adjusted_ex_date_jump_pct", 35)
+                )),
+            ))
+        except CorporateActionAdjustmentError as error:
+            invalidator = getattr(self._runner, "invalidate_security", None)
+            if invalidator is not None:
+                invalidator(
+                    isin, effective_to_date,
+                    f"CORPORATE_ACTION_DATA_QUALITY: {error}",
+                )
+            raise
         FeatureService(self._market).rebuild(
             isin, from_date, effective_to_date, adjusted.adjustment_version, versions.feature,
             changed_from_date=from_date,
@@ -44,8 +67,24 @@ class RecoveryService:
             isin, from_date, effective_to_date, adjusted.adjustment_version,
             versions.feature, adjusted.adjustment_version, as_of=effective_to_date,
         )
-        effective_versions = PatternEngineVersions(versions.engine, versions.feature, adjusted.adjustment_version)
-        report = self._runner.run_security(isin, effective_to_date, effective_versions, initiated_by="recovery")
+        return {
+            "isin": isin, "fromDate": from_date, "toDate": to_date,
+            "asOf": effective_to_date, "adjustmentVersion": adjusted.adjustment_version,
+            "versions": PatternEngineVersions(
+                versions.engine, versions.feature, adjusted.adjustment_version
+            ),
+            "prepareDurationMs": round((perf_counter() - started) * 1000),
+        }
+
+    def scan_prepared_security(self, prepared):
+        """Scan a prepared security after cross-sectional sector context exists."""
+
+        started = perf_counter()
+        isin = prepared["isin"]
+        effective_to_date = prepared["asOf"]
+        report = self._runner.run_security(
+            isin, effective_to_date, prepared["versions"], initiated_by="recovery"
+        )
         failures = [
             {
                 "isin": outcome.isin,
@@ -55,8 +94,8 @@ class RecoveryService:
             for outcome in getattr(report, "outcomes", ())
             if outcome.status == "FAILED"
         ]
-        result = {"isin": isin, "asOf": effective_to_date, "adjustmentVersion": adjusted.adjustment_version, "runId": report.run_id, "status": report.status.value, "metrics": report.metrics, "failures": failures, "durationMs": round((perf_counter() - started) * 1000)}
-        if self._logger: self._logger.emit("security_rebuild_completed", run_id=report.run_id, job_type="PATTERN_SCAN", isin=isin, requested_from_date=from_date, requested_to_date=to_date, duration_ms=result["durationMs"], row_count=report.metrics.get("candidatesDetected"), source_status=result["status"])
+        result = {"isin": isin, "asOf": effective_to_date, "adjustmentVersion": prepared["adjustmentVersion"], "runId": report.run_id, "status": report.status.value, "metrics": report.metrics, "failures": failures, "durationMs": prepared.get("prepareDurationMs", 0) + round((perf_counter() - started) * 1000)}
+        if self._logger: self._logger.emit("security_rebuild_completed", run_id=report.run_id, job_type="PATTERN_SCAN", isin=isin, requested_from_date=prepared["fromDate"], requested_to_date=prepared["toDate"], duration_ms=result["durationMs"], row_count=report.metrics.get("candidatesDetected"), source_status=result["status"])
         return result
 
     def explain(self, security, as_of_date, versions, *, pattern_type=None):

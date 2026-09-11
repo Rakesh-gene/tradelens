@@ -12,6 +12,7 @@ from data_pipeline.history_backfill import BackfillRequest, HistoryBackfillServi
 from data_pipeline.daily_delta import DailyDeltaRequest, DailyDeltaService
 from data_pipeline.nse_api import NseApiClient
 from data_pipeline.nse_data_collector import NseDataCollector
+from data_pipeline.nse_classification_collector import NseClassificationCollector
 from pattern_engine.enums import ImportStatus
 from repositories.equities import PostgresEquityRepository
 from repositories.market_data import PostgresMarketDataRepository
@@ -42,6 +43,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     daily.add_argument("--isin")
     daily.add_argument("--max-securities", type=int)
     daily.add_argument("--dry-run", action="store_true")
+    classifications = subparsers.add_parser(
+        "sync-classifications", help="Import NSE equity sector and industry classifications"
+    )
+    classifications.add_argument("--symbol", action="append", default=[])
+    classifications.add_argument("--limit", type=int, default=50)
+    classifications.add_argument("--all", action="store_true", dest="all_equities")
     contract = subparsers.add_parser(
         "verify-nse-contract", help="Run an opt-in live NSE parser contract check"
     )
@@ -56,6 +63,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _backfill_history(arguments)
     if arguments.command == "sync-daily":
         return _sync_daily(arguments)
+    if arguments.command == "sync-classifications":
+        return _sync_classifications(arguments)
     if arguments.command == "verify-nse-contract":
         return _verify_nse_contract(arguments)
     parser.error("Unsupported command")
@@ -160,6 +169,28 @@ def _years_before(value: date, years: int) -> date:
         return value.replace(year=value.year - years)
     except ValueError:  # 29 February
         return value.replace(year=value.year - years, month=2, day=28)
+
+
+def _sync_classifications(arguments: argparse.Namespace) -> int:
+    load_local_environment()
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise SystemExit("DATABASE_URL is required for classification imports")
+    if arguments.limit <= 0:
+        raise SystemExit("--limit must be positive")
+    market = PostgresMarketDataRepository(dsn)
+    collector = NseClassificationCollector(
+        PostgresEquityRepository(dsn, apply_migrations=False), NseApiClient(),
+        run_repository=market,
+    )
+    if arguments.symbol:
+        result = collector.refresh_symbols(arguments.symbol)
+    elif arguments.all_equities:
+        result = collector.backfill_all()
+    else:
+        result = collector.refresh_new_and_stale(limit=arguments.limit, initiated_by="manual")
+    print(json.dumps(result, indent=2))
+    return 0 if not result["failed"] else 1
 
 
 def _verify_nse_contract(arguments: argparse.Namespace) -> int:

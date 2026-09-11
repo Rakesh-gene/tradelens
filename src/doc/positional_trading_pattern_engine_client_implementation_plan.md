@@ -1,6 +1,19 @@
 # Positional Trading Pattern Engine — Client and API Integration Plan
 
 - **Plan version:** 1.0
+- **Sector rotation extension:** Protected `/sector-rotation` renders the
+  accessible quadrant and equivalent sector buttons. `GET /api/sectors/rotation?asOf=YYYY-MM-DD` returns
+  standard freshness/version metadata, methodology and `items` with `code`,
+  `name`, `rs1m`, `rs3m`, `rs6m`, `rs12m`, `momentum`, `zone`, `memberCount`,
+  `coveredCount`, `pairedCount`, `coveragePct`, `isPartial`, `featureVersions`
+  and `adjustmentVersions`.
+  `GET /api/sectors/stocks?sector=CODE&asOf=YYYY-MM-DD&pageSize=25&cursor=...`
+  returns standard metadata, `items` with `security`, nullable `rank`, RS horizons,
+  `featureVersion`, `adjustmentVersion`, and opaque nullable `nextCursor`.
+  Both require authentication. Dates/sectors and `sectorCursor` pagination are
+  shareable in the overview URL. Mobile uses labelled buttons grouped by zone.
+  Display server-provided RS in percentage points and identify momentum as a
+  proxy (specification 131); client calculations only place chart coordinates.
 - **Source specification:** `src/doc/positional_trading_pattern_engine_spec.md`
 - **Companion server plan:**
   `src/doc/positional_trading_pattern_engine_implementation_plan.md`
@@ -25,7 +38,7 @@ lets users search, filter, inspect, and compare those results.
 The current application has:
 
 - `App.jsx` with a small History API router;
-- `/` login, `/signup`, and protected `/overview` routes;
+- `/` login, `/signup`, and protected `/overview` and `/sector-rotation` routes;
 - JWT storage in `sessionStorage` under `tradelensAccessToken`;
 - session validation through `GET /api/auth/me`;
 - relative `/api/...` requests proxied by Vite to `127.0.0.1:9004`;
@@ -82,6 +95,7 @@ dynamic routes are added.
 | `/` | Public | `LoginPage` | Authenticate |
 | `/signup` | Public | `SignupPage` | Create an account |
 | `/overview` | Protected | `OverviewPage` | Market and opportunity summary |
+| `/sector-rotation` | Protected | `SectorRotationPage` | Sector RS and rotation drill-down |
 | `/setups` | Protected | `SetupsPage` | Filtered, paginated opportunity list |
 | `/patterns/:patternId` | Protected | `PatternDetailPage` | Pattern evidence and timeline |
 | `/securities/:isin` | Protected | `SecurityPage` | Complete technical fingerprint |

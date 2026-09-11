@@ -52,6 +52,29 @@ def weighted_score(values: Mapping[str, object | None], weights: Mapping[str, ob
     return ScoreBreakdown(_clamp(sum(contributions.values(), _D("0"))), normalized, contributions)
 
 
+def available_weighted_score(
+    values: Mapping[str, object | None], weights: Mapping[str, object]
+) -> ScoreBreakdown:
+    """Renormalize around unavailable evidence instead of treating it as weakness."""
+
+    available_weight = sum(
+        (_decimal(weight) for name, weight in weights.items() if values.get(name) is not None),
+        _D("0"),
+    )
+    if available_weight <= 0:
+        return weighted_score(values, weights)
+    normalized = {
+        name: _clamp(_decimal(value)) if value is not None else _D("0")
+        for name, value in values.items()
+    }
+    contributions = {
+        name: (_D("0") if values.get(name) is None else
+               normalized.get(name, _D("0")) * _decimal(weight) / available_weight)
+        for name, weight in weights.items()
+    }
+    return ScoreBreakdown(_clamp(sum(contributions.values(), _D("0"))), normalized, contributions)
+
+
 def maturity_band(score: object | None) -> str:
     if score is None:
         return "UNAVAILABLE"
@@ -83,7 +106,7 @@ def score_candidate(
         history_sessions=history_sessions,
     )
     context_weights = configuration.section("context_weights")
-    context_score = weighted_score(context_inputs, context_weights)
+    context_score = available_weighted_score(context_inputs, context_weights)
     setup_inputs = {
         "pattern_quality": candidate.quality_score,
         "pattern_maturity": candidate.maturity_score,
@@ -92,7 +115,7 @@ def score_candidate(
         "sector": context_inputs["sector_strength"],
         "volume": context_inputs["volume"],
     }
-    setup_score = weighted_score(setup_inputs, configuration.section("setup_weights"))
+    setup_score = available_weighted_score(setup_inputs, configuration.section("setup_weights"))
     scored = replace(
         candidate,
         quality_score=_optional_bounded(candidate.quality_score),
@@ -133,7 +156,7 @@ def _snapshot_score(snapshot, *keys):
         value = snapshot.get(key)
         if value is not None:
             return _clamp(_decimal(value))
-    return _D("0")
+    return None
 
 
 def _trend_score(feature, close):

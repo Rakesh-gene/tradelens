@@ -113,7 +113,7 @@ class HistoryBackfillServiceTestCase(unittest.TestCase):
         self.assertEqual(len(self.repository.raw_bars), 1)
         self.assertEqual(len(self.repository.actions), 1)
 
-    def test_completed_checkpoint_skips_download_for_already_covered_range(self) -> None:
+    def test_completed_checkpoint_skips_prices_but_reaudits_actions(self) -> None:
         self.repository.checkpoints[(ImportJobType.HISTORY_BACKFILL, "INE000000001")] = {
             "status": ImportStatus.COMPLETED.value,
             "last_attempted_from_date": date(2026, 1, 1),
@@ -131,10 +131,13 @@ class HistoryBackfillServiceTestCase(unittest.TestCase):
 
         self.assertEqual(result.status, ImportStatus.COMPLETED)
         self.assertEqual(self.client.history_calls, [])
-        self.assertEqual(self.client.action_calls, [])
+        self.assertEqual(
+            [("EXAMPLE", date(2026, 9, 4), date(2026, 9, 4))],
+            self.client.action_calls,
+        )
         self.assertEqual(result.securities[0].chunks, [])
 
-    def test_daily_run_downloads_only_missing_price_tail_and_recent_actions(self) -> None:
+    def test_daily_run_downloads_only_missing_price_tail_and_full_action_history(self) -> None:
         self.repository.date_ranges["INE000000001"] = (
             date(2016, 9, 7), date(2026, 9, 4)
         )
@@ -160,7 +163,7 @@ class HistoryBackfillServiceTestCase(unittest.TestCase):
             self.client.history_calls,
         )
         self.assertEqual(
-            [("EXAMPLE", date(2026, 8, 15), date(2026, 9, 7))],
+            [("EXAMPLE", date(2020, 1, 1), date(2026, 9, 7))],
             self.client.action_calls,
         )
         self.assertEqual(

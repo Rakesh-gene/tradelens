@@ -2,13 +2,14 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.jsx'
-import { getCurrentUser } from './api/authApi.js'
+import { getCurrentUser, login } from './api/authApi.js'
 
 vi.mock('./api/authApi.js', async (load) => {
   const actual = await load()
-  return { ...actual, getCurrentUser: vi.fn() }
+  return { ...actual, getCurrentUser: vi.fn(), login: vi.fn() }
 })
 vi.mock('./pages/OverviewPage.jsx', () => ({ default: () => <h1>Overview fixture</h1> }))
+vi.mock('./pages/SectorRotationPage.jsx', () => ({ default: () => <h1>Sector rotation fixture</h1> }))
 vi.mock('./pages/SetupsPage.jsx', () => ({ default: () => <h1>Setups fixture</h1> }))
 vi.mock('./pages/PatternDetailPage.jsx', () => ({ default: () => <h1>Pattern fixture</h1> }))
 vi.mock('./pages/SecurityPage.jsx', () => ({ default: () => <h1>Security fixture</h1> }))
@@ -20,6 +21,7 @@ describe('App session routing', () => {
     sessionStorage.clear()
     localStorage.clear()
     getCurrentUser.mockReset()
+    login.mockReset()
     window.history.replaceState({}, '', '/')
   })
 
@@ -33,6 +35,22 @@ describe('App session routing', () => {
     expect(localStorage.getItem('tradelensTheme')).toBe('forest')
   })
 
+  it('shows the header risk notice after a successful login', async () => {
+    login.mockResolvedValue({
+      accessToken: 'signed-in-token',
+      user: { email: 'person@example.com', isAdmin: false },
+    })
+    getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com', isAdmin: false } })
+    render(<App />)
+
+    await userEvent.type(screen.getByLabelText('Email address'), 'person@example.com')
+    await userEvent.type(screen.getByLabelText('Password'), 'secret')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByRole('heading', { name: 'Overview fixture' })).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toMatch(/Trading can result in loss of capital/i)
+  })
+
   it('validates a token before rendering protected content and signs out with replacement', async () => {
     sessionStorage.setItem('tradelensAccessToken', 'test-token')
     window.history.replaceState({}, '', '/overview')
@@ -43,6 +61,15 @@ describe('App session routing', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(window.location.pathname).toBe('/'))
     expect(sessionStorage.getItem('tradelensAccessToken')).toBeNull()
+    expect(screen.queryByText('Overview fixture')).toBeNull()
+  })
+
+  it('opens sector rotation as its own protected page', async () => {
+    sessionStorage.setItem('tradelensAccessToken', 'test-token')
+    window.history.replaceState({}, '', '/sector-rotation')
+    getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com', isAdmin: false } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Sector rotation fixture' })).toBeTruthy()
     expect(screen.queryByText('Overview fixture')).toBeNull()
   })
 

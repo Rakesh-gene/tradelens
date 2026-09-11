@@ -90,6 +90,84 @@ class PatternLifecycleService:
         )
         return LifecycleResult("updated", instance, event_type)
 
+    def invalidate_adjustment_mismatches(
+        self, isin: str, adjustment_version: str, as_of_date: date
+    ) -> list[LifecycleResult]:
+        """Close active instances whose price levels belong to another scale."""
+
+        results = []
+        for instance in self._repository.load_active_patterns(isin):
+            previous_version = str(_field(instance, "adjustment_version") or "")
+            if previous_version == adjustment_version:
+                continue
+            state = PatternState(str(_field(instance, "state")))
+            measurements = dict(_field(instance, "measurements") or {})
+            measurements["invalidation_reason"] = "ADJUSTMENT_VERSION_CHANGED"
+            measurements["replacement_adjustment_version"] = adjustment_version
+            values = {
+                **dict(instance),
+                "state": PatternState.INVALIDATED.value,
+                "terminal_date": as_of_date,
+                "last_updated_date": as_of_date,
+                "measurements": measurements,
+            }
+            previous_values = {
+                **self._event_values(instance),
+                "adjustment_version": previous_version,
+            }
+            new_values = {
+                **self._event_values(values),
+                "adjustment_version": previous_version,
+                "replacement_adjustment_version": adjustment_version,
+                "invalidation_reason": "ADJUSTMENT_VERSION_CHANGED",
+            }
+            event = self._event(
+                PatternEventType.INVALIDATED, state, PatternState.INVALIDATED,
+                int(_field(instance, "state_version") or 1) + 1,
+                previous_values, new_values, as_of_date,
+            )
+            updated = self._repository.update_pattern(
+                str(_field(instance, "id")),
+                int(_field(instance, "state_version") or 1),
+                values,
+                event,
+            )
+            results.append(LifecycleResult(
+                "invalidated", updated, PatternEventType.INVALIDATED
+            ))
+        return results
+
+    def invalidate_active(
+        self, isin: str, as_of_date: date, reason: str
+    ) -> list[LifecycleResult]:
+        """Quarantine live instances when their source price history is unsafe."""
+
+        results = []
+        for instance in self._repository.load_active_patterns(isin):
+            state = PatternState(str(_field(instance, "state")))
+            measurements = dict(_field(instance, "measurements") or {})
+            measurements["invalidation_reason"] = reason
+            values = {
+                **dict(instance), "state": PatternState.INVALIDATED.value,
+                "terminal_date": as_of_date, "last_updated_date": as_of_date,
+                "measurements": measurements,
+            }
+            event = self._event(
+                PatternEventType.INVALIDATED, state, PatternState.INVALIDATED,
+                int(_field(instance, "state_version") or 1) + 1,
+                self._event_values(instance),
+                {**self._event_values(values), "invalidation_reason": reason},
+                as_of_date,
+            )
+            updated = self._repository.update_pattern(
+                str(_field(instance, "id")),
+                int(_field(instance, "state_version") or 1), values, event,
+            )
+            results.append(LifecycleResult(
+                "invalidated", updated, PatternEventType.INVALIDATED
+            ))
+        return results
+
     def expire_stale(self, isin: str, as_of_date: date, trading_dates: Sequence[date]) -> list[LifecycleResult]:
         ordered_dates = sorted(day for day in trading_dates if day <= as_of_date)
         index = {day: position for position, day in enumerate(ordered_dates)}

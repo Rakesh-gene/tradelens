@@ -3104,6 +3104,21 @@ Failed breakouts
 
 # 131. Sector Strength Inputs
 
+The overview extension (`sector-rotation-v1`) uses sector medians of persisted
+stock benchmark-relative returns in percentage points. X is median 63-session
+RS. Y is median 21-session RS minus one-third of median 63-session RS, using
+same-date constituents with both horizons. This linear normalization is a
+momentum proxy, not a compounded return, observed sector-history transition,
+or proprietary RRG. Nonnegative X/Y = LEADING; nonnegative X and negative Y =
+WEAKENING; negative X/Y = LAGGING; negative X and nonnegative Y = IMPROVING.
+Missing axes yield UNAVAILABLE. Zero is included on the nonnegative side.
+
+Membership is effective-dated and eligibility uses current EQ securities.
+Never backdate imported classifications or call this a point-in-time backtest.
+Publish covered/member/paired counts and label partial data. Stock drill-down
+ranks all members, including stocks without active patterns, by 3M RS descending,
+nulls last and ISIN ascending. Missing RS has no displayed rank.
+
 For each sector/index:
 
 ```text

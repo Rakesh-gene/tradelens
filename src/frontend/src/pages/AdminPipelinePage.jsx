@@ -126,10 +126,10 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
           {equities.data && <>
             <div className="admin-table-wrap">
               <table className="admin-equity-table">
-                <thead><tr><th scope="col"><input type="checkbox" aria-label="Select every equity on this page" checked={allPageSelected} onChange={togglePage} /></th><th scope="col">Symbol</th><th scope="col">Company</th><th scope="col">ISIN</th><th scope="col">Latest data</th><th scope="col">Last pipeline</th></tr></thead>
-                <tbody>{equities.data.items.length === 0 && <tr><td className="admin-table-empty" colSpan="6">No equities match this search. Import the NSE equity master if the system has not been populated yet.</td></tr>}{equities.data.items.map((equity) => <tr key={equity.isin} className={selected.has(equity.isin) ? 'is-selected' : ''}>
+                <thead><tr><th scope="col"><input type="checkbox" aria-label="Select every equity on this page" checked={allPageSelected} onChange={togglePage} /></th><th scope="col">Symbol</th><th scope="col">Company</th><th scope="col">Classification</th><th scope="col">ISIN</th><th scope="col">Latest data</th><th scope="col">Last pipeline</th></tr></thead>
+                <tbody>{equities.data.items.length === 0 && <tr><td className="admin-table-empty" colSpan="7">No equities match this search. Import the NSE equity master if the system has not been populated yet.</td></tr>}{equities.data.items.map((equity) => <tr key={equity.isin} className={selected.has(equity.isin) ? 'is-selected' : ''}>
                   <td><input type="checkbox" aria-label={`Select ${equity.symbol}`} checked={selected.has(equity.isin)} onChange={() => toggle(equity.isin)} /></td>
-                  <th scope="row">{equity.symbol}</th><td>{equity.companyName}</td><td><code>{equity.isin}</code></td><td>{formatMarketDate(equity.latestRawDate)}</td><td>{equity.lastPipelineStatus || 'Never run'}</td>
+                  <th scope="row">{equity.symbol}</th><td>{equity.companyName}</td><td><strong>{equity.sectorName || 'Not classified'}</strong><small>{equity.basicIndustryName || equity.classificationStatus}</small></td><td><code>{equity.isin}</code></td><td>{formatMarketDate(equity.latestRawDate)}</td><td>{equity.lastPipelineStatus || 'Never run'}</td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -150,21 +150,25 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
 
 function PipelineRunStatus({ run, controlling, onControl, onNavigate, onItemPage }) {
   const handled = Number(run.securitiesCompleted || 0) + Number(run.securitiesFailed || 0)
-  const progress = run.securitiesTotal ? handled / run.securitiesTotal * 100 : 0
+  const prepared = Number(run.securitiesPrepared || 0)
+  const visiblePrepared = (run.items || []).filter((item) => item.currentStage === 'SECTOR_CONTEXT').length
+  const progress = run.securitiesTotal ? ((handled * 2) + prepared) / (run.securitiesTotal * 2) * 100 : 0
   const canPause = ['PENDING', 'RUNNING'].includes(run.status)
   const canResume = ['FAILED', 'PARTIAL', 'PAUSED'].includes(run.status) && handled < Number(run.securitiesTotal || 0)
   const canTerminate = ['PENDING', 'RUNNING', 'PAUSED'].includes(run.status)
   return <section className="admin-run-status" aria-live="polite" aria-labelledby="active-run-title">
     <div className="card-title"><div><p className="eyebrow">{run.runScope === 'ALL' ? `All equities · batches of ${run.batchSize}` : 'Selected equities'}</p><h2 id="active-run-title">Run {String(run.runId).slice(0, 8)}</h2></div><StateBadge state={run.status} /></div>
+    {run.status === 'RUNNING' && handled === 0 && (prepared > 0 || visiblePrepared > 0) && <p className="pipeline-phase-note"><strong>Phase 1 of 2 · Preparing the universe.</strong> {prepared > 0 ? `${prepared} equities are ready for sector context.` : `${visiblePrepared} equities on this page are ready for sector context.`} Pattern scanning starts after preparation finishes so every equity uses the same complete sector snapshot.</p>}
+    {run.status === 'RUNNING' && Number(run.securitiesCompleted || 0) > 0 && <p className="pipeline-phase-note"><strong>Phase 2 of 2 · Scanning patterns.</strong> Sector context is ready and prepared equities are now being classified.</p>}
     <div className="admin-progress" aria-label={`${Math.round(progress)} percent complete`}><span style={{ width: `${progress}%` }} /></div>
-    <div className="admin-run-metrics"><span>Total<strong>{run.securitiesTotal}</strong></span><span>Completed<strong>{run.securitiesCompleted}</strong></span><span>Failed<strong>{run.securitiesFailed}</strong></span><span>Range<strong>{formatMarketDate(run.fromDate)} – {formatMarketDate(run.toDate)}</strong></span></div>
+    <div className="admin-run-metrics"><span>Total<strong>{run.securitiesTotal}</strong></span><span>{prepared > 0 ? 'Prepared' : 'Prepared on page'}<strong>{prepared || visiblePrepared}</strong></span><span>Completed<strong>{run.securitiesCompleted}</strong></span><span>Failed<strong>{run.securitiesFailed}</strong></span><span>Range<strong>{formatMarketDate(run.fromDate)} – {formatMarketDate(run.toDate)}</strong></span></div>
     <div className="admin-run-actions" aria-label="Pipeline run controls">
       {canPause && <button className="secondary-button" type="button" disabled={Boolean(controlling)} onClick={() => onControl('pause')}>{controlling === 'pause' ? 'Pausing…' : 'Pause after current equity'}</button>}
       {canResume && <button className="primary-button" type="button" disabled={Boolean(controlling)} onClick={() => onControl('resume')}>{controlling === 'resume' ? 'Resuming…' : 'Resume unfinished equities'}</button>}
       {canTerminate && <button className="secondary-button" type="button" disabled={Boolean(controlling)} onClick={() => onControl('terminate')}>{controlling === 'terminate' ? 'Terminating…' : 'Terminate run'}</button>}
     </div>
     {run.errorSummary && <p className="form-message error">{run.errorSummary}</p>}
-    <div className="admin-item-grid">{(run.items || []).map((item) => <article key={item.isin}><div><strong>{item.symbol}</strong><small>{item.isin}</small></div><StateBadge state={item.status} /><p>{stageLabel(item.currentStage)}</p><dl><div><dt>Rows</dt><dd>{item.rowsDownloaded || 0}</dd></div><div><dt>Candidates</dt><dd>{item.candidatesDetected || 0}</dd></div></dl>{item.error && <small className="admin-item-error">{item.error}</small>}{item.status === 'COMPLETED' && <button type="button" className="text-button" onClick={() => onNavigate(`/securities/${item.isin}`)}>Inspect evidence -&gt;</button>}</article>)}</div>
+    <div className="admin-item-grid">{(run.items || []).map((item) => { const preparedItem = item.currentStage === 'SECTOR_CONTEXT'; return <article key={item.isin}><div><strong>{item.symbol}</strong><small>{item.isin}</small></div><StateBadge state={preparedItem ? 'PREPARED' : item.status} /><p>{preparedItem ? 'Waiting for universe sector context' : stageLabel(item.currentStage)}</p><dl><div><dt>Rows</dt><dd>{item.rowsDownloaded || 0}</dd></div><div><dt>Candidates</dt><dd>{item.candidatesDetected || 0}</dd></div></dl>{item.error && <small className="admin-item-error">{item.error}</small>}{item.status === 'COMPLETED' && <button type="button" className="text-button" onClick={() => onNavigate(`/securities/${item.isin}`)}>Inspect evidence -&gt;</button>}</article> })}</div>
     {Number(run.itemTotalPages || 0) > 1 && <div className="pagination admin-item-pagination"><button className="secondary-button" type="button" disabled={run.itemPage <= 1} onClick={() => onItemPage(run.itemPage - 1)}>Previous items</button><span>Items page {run.itemPage} of {run.itemTotalPages}</span><button className="secondary-button" type="button" disabled={run.itemPage >= run.itemTotalPages} onClick={() => onItemPage(run.itemPage + 1)}>Next items</button></div>}
   </section>
 }

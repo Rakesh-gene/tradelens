@@ -61,6 +61,14 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
         ['Maturity', currentScores.maturity],
         ['Context', currentScores.context],
       ].filter(([, value]) => value != null)
+      const classification = fingerprint.classification || {}
+      const classificationValues = {
+        macroSector: classification.macroSector?.name,
+        sector: classification.sector?.name,
+        industry: classification.industry?.name,
+        basicIndustry: classification.basicIndustry?.name,
+        status: classification.status,
+      }
       return <>
         <PageIntro
           title={fingerprint.security.symbol || fingerprint.security.isin}
@@ -71,6 +79,11 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
         {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>Current operating view</h2></div><StateBadge state={primary.state} /></div><DecisionSummary decision={primary.decision} /></section>}
 
         <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} evidence={chart.evidence} corporateActions={chart.corporateActions} range={chartRange} onRangeChange={setChartRange} /></section>
+
+        <section className="detail-grid">
+          <article className="evidence-card"><h2>Company classification</h2><MeasurementGrid values={classificationValues} /></article>
+          <article className="evidence-card"><h2>Sector strength</h2><MeasurementGrid values={fingerprint.sectorStrength || {}} /></article>
+        </section>
 
         <section className="detail-grid">
           <article className="evidence-card">

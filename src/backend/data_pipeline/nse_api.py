@@ -16,11 +16,13 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from data_pipeline.models import (
     NseCorporateActionRecord,
+    NseEquityClassification,
     NseEquityHistoryRecord,
     NseIndexHistoryRecord,
 )
 from data_pipeline.normalization import (
     parse_corporate_actions_response,
+    parse_equity_classification_response,
     parse_equity_history_response,
     parse_index_history_response,
 )
@@ -110,6 +112,9 @@ class NseApiClient:
         self._circuit_open_until = 0.0
         self._corporate_action_lock = Lock()
         self._corporate_action_cache: dict[tuple[date, date], object] = {}
+        self._corporate_action_symbol_cache: dict[
+            tuple[date, date], dict[str, list[Mapping[str, object]]]
+        ] = {}
         self._metrics = {
             "requestAttempts": 0, "successfulRequests": 0,
             "rateLimitedRequests": 0, "blockedRequests": 0,
@@ -129,6 +134,21 @@ class NseApiClient:
         """Download the NSE equity master CSV after validating it is not an error page."""
 
         return self._download_file(self.EQUITIES_URL, "equity master CSV")
+
+    def fetch_equity_classification(
+        self, symbol: str, expected_isin: str
+    ) -> NseEquityClassification:
+        """Return NSE's current four-level classification for an equity."""
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        payload = self._request_json(
+            self.EQUITY_HISTORY_URL,
+            {"functionName": "getSymbolData", "marketType": "N",
+             "series": "EQ", "symbol": normalized_symbol},
+        )
+        return parse_equity_classification_response(
+            payload, normalized_symbol, expected_isin
+        )
 
     def fetch_equity_history(
         self, symbol: str, from_date: date, to_date: date
@@ -172,9 +192,16 @@ class NseApiClient:
                         },
                     )
                     self._corporate_action_cache[key] = payload
+                    self._corporate_action_symbol_cache[key] = self._index_actions_by_symbol(payload)
                 else:
                     self._increment_metric("corporateActionCacheHits")
-            records.extend(parse_corporate_actions_response(payload, normalized_symbol))
+                indexed = self._corporate_action_symbol_cache.get(key)
+                if indexed is None:
+                    indexed = self._index_actions_by_symbol(payload)
+                    self._corporate_action_symbol_cache[key] = indexed
+            records.extend(parse_corporate_actions_response(
+                {"data": indexed.get(normalized_symbol, [])}, normalized_symbol
+            ))
         requested = [record for record in records if from_date <= record.ex_date <= to_date]
         return self._deduplicate_actions(requested)
 
@@ -261,11 +288,15 @@ class NseApiClient:
             f"delivery report for {trading_date.isoformat()}",
         )
 
-    def _request_json(self, url: str, parameters: Mapping[str, str]) -> object:
+    def _request_json(
+        self, url: str, parameters: Mapping[str, str], *,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> object:
         query = urlencode(parameters)
         body, content_type = self._request_bytes(
             f"{url}?{query}",
             "application/json, text/plain;q=0.9, */*;q=0.8",
+            extra_headers=extra_headers,
         )
         self._validate_json_response(body, content_type)
         try:
@@ -526,3 +557,32 @@ class NseApiClient:
     def _deduplicate_actions(records: list[NseCorporateActionRecord]) -> list[NseCorporateActionRecord]:
         unique = {record.source_event_key: record for record in records}
         return sorted(unique.values(), key=lambda record: (record.ex_date, record.source_event_key))
+
+    @staticmethod
+    def _index_actions_by_symbol(payload: object) -> dict[str, list[Mapping[str, object]]]:
+        if isinstance(payload, Mapping):
+            values = payload.get("data", payload.get("records", ()))
+        else:
+            values = payload
+        if isinstance(values, Mapping):
+            if not values:
+                values = ()
+            else:
+                values = next((
+                    values[key] for key in ("data", "records", "rows", "content")
+                    if isinstance(values.get(key), (list, tuple))
+                ), ())
+        if not isinstance(values, (list, tuple)):
+            return {}
+        result: dict[str, list[Mapping[str, object]]] = {}
+        for row in values:
+            if not isinstance(row, Mapping):
+                continue
+            symbol = next((
+                value for key, value in row.items()
+                if str(key).replace("_", "").lower() in {"symbol", "chsymbol"}
+            ), None)
+            normalized = " ".join(str(symbol or "").strip().upper().split())
+            if normalized:
+                result.setdefault(normalized, []).append(row)
+        return result

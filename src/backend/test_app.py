@@ -182,6 +182,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(context.exception.code, 404)
 
     def test_pattern_product_endpoints_require_bearer_token(self) -> None:
+        for path in ("/api/sectors/rotation", "/api/sectors/stocks?sector=TECH&asOf=2026-09-10"):
+            with self.assertRaises(HTTPError) as context:
+                urlopen(f"{self.base_url}{path}")
+            self.assertEqual(context.exception.code, 401)
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/api/overview")
         self.assertEqual(context.exception.code, 401)
@@ -268,6 +272,12 @@ class ApiTestCase(unittest.TestCase):
             payload = json.load(response)
         self.assertIn("countsByState", payload)
         self.assertIn("topSetups", payload)
+        request = Request(f"{self.base_url}/api/sectors/rotation", headers={"Authorization": f"Bearer {token}"})
+        with urlopen(request) as response:
+            self.assertIn("items", json.load(response))
+        request = Request(f"{self.base_url}/api/sectors/stocks?sector=TECH&asOf=2026-09-10", headers={"Authorization": f"Bearer {token}"})
+        with urlopen(request) as response:
+            self.assertIn("nextCursor", json.load(response))
 
     def test_authenticated_reliance_fingerprint_returns_data_and_lineage_contract(self) -> None:
         self.repository.create_user(

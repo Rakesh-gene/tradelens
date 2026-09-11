@@ -16,6 +16,7 @@ from repositories.operations import PostgresOperationsRepository
 from data_pipeline.history_backfill import HistoryBackfillService
 from data_pipeline.benchmark_history import BenchmarkHistoryService
 from data_pipeline.nse_data_collector import NseDataCollector
+from data_pipeline.nse_classification_collector import NseClassificationCollector
 from data_pipeline.nse_api import NseApiClient
 from operations.admin_pipeline import AdminPipelineService, DisabledAdminPipelineService
 from operations.monitoring import StructuredEventLogger
@@ -90,6 +91,7 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
         event_logger = StructuredEventLogger(operations_repository)
         nse_client = NseApiClient()
         admin_pipeline_repository = PostgresAdminPipelineRepository(dsn, apply_migrations=False)
+        equity_repository = PostgresEquityRepository(dsn, apply_migrations=False)
         admin_pipeline_service = AdminPipelineService(
             admin_pipeline_repository,
             HistoryBackfillService(market_repository, nse_client, event_logger=event_logger),
@@ -98,10 +100,14 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
             max_workers=max(1, min(8, int(os.getenv("ADMIN_PIPELINE_WORKERS", "3")))),
             benchmark_history=BenchmarkHistoryService(market_repository, nse_client),
             equity_collector=NseDataCollector(
-                PostgresEquityRepository(dsn, apply_migrations=False),
+                equity_repository,
                 nse_client,
                 run_repository=market_repository,
             ),
+            classification_collector=NseClassificationCollector(
+                equity_repository, nse_client, run_repository=market_repository
+            ),
+            sector_repository=market_repository,
         )
         admin_pipeline_service.recover_interrupted_runs()
     admin_pipeline_service = admin_pipeline_service or DisabledAdminPipelineService()

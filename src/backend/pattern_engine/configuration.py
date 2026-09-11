@@ -205,6 +205,11 @@ def _validate_adjustment_policy(configuration: Mapping[str, Any]) -> None:
         raise ConfigurationError("Configuration adjustments.source_mode is invalid")
     if adjustments.get("cash_dividend_policy") not in {"ignore", "adjust_price"}:
         raise ConfigurationError("Configuration adjustments.cash_dividend_policy is invalid")
+    maximum_jump = adjustments.get("maximum_adjusted_ex_date_jump_pct")
+    if not _is_number(maximum_jump) or maximum_jump <= 0:
+        raise ConfigurationError(
+            "Configuration adjustments.maximum_adjusted_ex_date_jump_pct must be positive"
+        )
 
 
 def _is_number(value: object) -> bool:

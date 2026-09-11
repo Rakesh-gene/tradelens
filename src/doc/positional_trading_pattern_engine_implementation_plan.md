@@ -1,6 +1,12 @@
 # Positional Trading Pattern Engine — Low-Level Implementation Plan
 
 - **Plan version:** 1.0
+- **Sector rotation extension:** `sector-rotation-v1` reads same-session feature
+  medians through `repositories/sector_rotation.py`; no migration or external
+  feed is required. `pattern_engine/sector_rotation.py` owns zone classification
+  and the explicit short/medium-horizon momentum proxy from specification 131.
+  Queries aggregate sectors and paginate strength-ranked constituents in SQL.
+  Retain effective-dated membership, nulls and coverage; never backdate sectors.
 - **Source specification:** `src/doc/positional_trading_pattern_engine_spec.md`
 - **Target application:** TradeLens
 - **Execution model:** Indian equities, end-of-day processing

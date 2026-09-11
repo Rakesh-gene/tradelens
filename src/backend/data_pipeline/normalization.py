@@ -14,10 +14,55 @@ from typing import Any, Mapping, Sequence
 
 from data_pipeline.models import (
     NseCorporateActionRecord,
+    NseEquityClassification,
     NseEquityHistoryRecord,
     NseIndexHistoryRecord,
     freeze_json_value,
 )
+
+
+def parse_equity_classification_response(
+    payload: object, expected_symbol: str, expected_isin: str
+) -> NseEquityClassification:
+    """Validate the identity and four-level NSE industry classification."""
+
+    if not isinstance(payload, Mapping):
+        raise NseDataValidationError(expected_symbol, "response", "is not an object")
+    source_payload = payload
+    response_rows = payload.get("equityResponse")
+    if isinstance(response_rows, Sequence) and response_rows and isinstance(response_rows[0], Mapping):
+        quote = response_rows[0]
+        info = quote.get("metaData")
+        security = quote.get("secInfo")
+        industry_info = ({
+            "macro": security.get("macro"), "sector": security.get("sector"),
+            "industry": security.get("industryInfo"),
+            "basicIndustry": security.get("basicIndustry"),
+        } if isinstance(security, Mapping) else None)
+    else:
+        info = payload.get("info")
+        industry_info = payload.get("industryInfo")
+    if not isinstance(info, Mapping) or not isinstance(industry_info, Mapping):
+        raise NseDataValidationError(expected_symbol, "industryInfo", "is missing")
+    symbol = _required_text(info, ("symbol",), expected_symbol, "symbol")
+    isin = _required_text(info, ("isin", "isinCode"), expected_symbol, "isin").upper()
+    if _normalize_symbol(symbol) != _normalize_symbol(expected_symbol):
+        raise NseDataValidationError(expected_symbol, "symbol", "does not match the requested equity")
+    if isin != expected_isin.strip().upper():
+        raise NseDataValidationError(expected_symbol, "isin", "does not match the stable security ISIN")
+    values = {
+        "macro_sector": _required_text(industry_info, ("macro",), symbol, "macro"),
+        "sector": _required_text(industry_info, ("sector",), symbol, "sector"),
+        "industry": _required_text(industry_info, ("industry",), symbol, "industry"),
+        "basic_industry": _required_text(
+            industry_info, ("basicIndustry", "basic_industry"), symbol, "basicIndustry"
+        ),
+    }
+    return NseEquityClassification(
+        symbol=_normalize_symbol(symbol), isin=isin, **values,
+        source_checksum=_checksum({"info": dict(info), "industryInfo": dict(industry_info)}),
+        source_payload=freeze_json_value(source_payload),
+    )
 
 
 class NseDataValidationError(ValueError):
@@ -42,7 +87,22 @@ DATE_FORMATS = (
 NULL_VALUES = frozenset({"", "-", "na", "n/a", "null", "none", "nan"})
 ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{10}$")
 RATIO_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)")
-CASH_PATTERN = re.compile(r"(?:rs\.?|inr|₹)\s*(\d+(?:,\d{3})*(?:\.\d+)?)", re.IGNORECASE)
+FACE_VALUE_CHANGE_PATTERN = re.compile(
+    r"\b(?:from|frm)\s+(?:(?:rs\.?|re\.?|inr)\s*)?(\d+(?:\.\d+)?)\s*(?:/-?)?"
+    r".*?\bto\s+(?:(?:rs\.?|re\.?|inr)\s*)?(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+CASH_PATTERN = re.compile(r"(?:rs\.?|re\.?|inr)\s*(\d+(?:,\d{3})*(?:\.\d+)?)", re.IGNORECASE)
+RIGHTS_PREMIUM_PATTERN = re.compile(
+    r"(?:premium|prem)\s*(?:of\s*)?(?:rs\.?|re\.?|inr)?\s*"
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+RIGHTS_ISSUE_PRICE_PATTERN = re.compile(
+    r"(?:issue\s+price\s*(?:of\s*)?|@\s*)(?:rs\.?|re\.?|inr)\s*"
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 
 
 def parse_equity_history_response(
@@ -61,6 +121,12 @@ def parse_equity_history_response(
         high_price = _required_positive_decimal(fields, ("ch_trade_high_price", "high", "high_price"), symbol, trading_date)
         low_price = _required_positive_decimal(fields, ("ch_trade_low_price", "low", "low_price"), symbol, trading_date)
         close_price = _required_positive_decimal(fields, ("ch_closing_price", "close", "close_price"), symbol, trading_date)
+        previous_close_price = _optional_decimal(
+            fields,
+            ("ch_previous_cls_price", "previous_close", "previous_close_price", "prev_close"),
+            symbol,
+            trading_date,
+        )
         _validate_ohlc(symbol, trading_date, open_price, high_price, low_price, close_price)
         volume = _required_non_negative_int(
             fields,
@@ -98,6 +164,7 @@ def parse_equity_history_response(
                 delivery_percentage=delivery_percentage,
                 source_checksum=_checksum(raw_record),
                 source_payload=freeze_json_value(raw_record),
+                previous_close_price=previous_close_price,
             )
         )
     return records
@@ -118,8 +185,16 @@ def parse_corporate_actions_response(
         ex_date = _required_date(fields, ("exdate", "ex_date"), symbol)
         raw_description = _required_text(fields, ("subject", "purpose", "description"), symbol, "subject")
         action_type = _classify_action_type(raw_description)
-        numerator, denominator = _parse_ratio(raw_description)
+        numerator, denominator = _parse_ratio(raw_description, action_type)
         cash_value = _parse_cash_value(raw_description) if action_type == "DIVIDEND" else None
+        face_value = _optional_decimal(
+            fields, ("faceval", "facevalue", "face_value"), symbol, ex_date
+        )
+        old_face_value, new_face_value = _parse_face_value_change(raw_description)
+        issue_price = (
+            _parse_rights_issue_price(raw_description, face_value)
+            if action_type == "RIGHTS" else None
+        )
         source_checksum = _checksum(raw_record)
         source_event_key = _corporate_action_key(symbol, ex_date, action_type, raw_description)
         records.append(
@@ -140,6 +215,10 @@ def parse_corporate_actions_response(
                 raw_description=raw_description,
                 source_checksum=source_checksum,
                 source_payload=freeze_json_value(raw_record),
+                face_value=face_value,
+                issue_price=issue_price,
+                old_face_value=old_face_value,
+                new_face_value=new_face_value,
             )
         )
     return records
@@ -253,6 +332,7 @@ def raw_bar_record(
         "high_price": record.high_price,
         "low_price": record.low_price,
         "close_price": record.close_price,
+        "previous_close_price": record.previous_close_price,
         "volume": record.volume,
         "deliverable_quantity": record.deliverable_quantity,
         "delivery_percentage": record.delivery_percentage,
@@ -291,6 +371,10 @@ def corporate_action_record(
         "numerator": record.numerator,
         "denominator": record.denominator,
         "cash_value": record.cash_value,
+        "face_value": record.face_value,
+        "issue_price": record.issue_price,
+        "old_face_value": record.old_face_value,
+        "new_face_value": record.new_face_value,
         "currency": record.currency,
         "raw_description": record.raw_description,
         "raw_payload": record.source_payload,
@@ -343,6 +427,17 @@ def _extract_records(payload: object, symbol: str) -> Sequence[Mapping[str, obje
         raise NseDataValidationError(symbol, "response", "must be an object or list")
     if records is None:
         return ()
+    # NSE occasionally adds one response envelope around the same row array.
+    # Accept only named record containers; do not flatten arbitrary objects,
+    # which could turn an error/metadata response into apparent market data.
+    if isinstance(records, Mapping):
+        if not records:
+            return ()
+        for key in ("data", "records", "rows", "content"):
+            nested = records.get(key)
+            if isinstance(nested, list):
+                records = nested
+                break
     if not isinstance(records, list):
         raise NseDataValidationError(symbol, "response.data", "must be a list")
     if not all(isinstance(record, Mapping) for record in records):
@@ -475,24 +570,60 @@ def _checksum(record: Mapping[str, object]) -> str:
 
 def _classify_action_type(description: str) -> str:
     text = description.upper()
-    for keyword, action_type in (
-        ("DIVIDEND", "DIVIDEND"),
-        ("BONUS", "BONUS"),
-        ("SPLIT", "SPLIT"),
-        ("RIGHT", "RIGHTS"),
-        ("CONSOLIDAT", "CONSOLIDATION"),
-        ("BUYBACK", "BUYBACK"),
-    ):
-        if keyword in text:
-            return action_type
+    if any(value in text for value in ("NCRPS", "CCPS", "DEBENTURE", "WARRANT")) and "BONUS" in text:
+        return "NON_EQUITY_DISTRIBUTION"
+    has_bonus = "BONUS" in text
+    has_split = any(value in text for value in ("SPLIT", "SPLT", "SUB-DIVISION", "SUB DIVISION"))
+    if "CONSOLIDAT" in text or "REVERSE SPLIT" in text:
+        return "CONSOLIDATION"
+    if has_bonus and has_split:
+        return "BONUS_SPLIT"
+    if has_bonus:
+        return "BONUS"
+    if has_split:
+        return "SPLIT"
+    if "DEMERG" in text or "DE-MERG" in text:
+        return "DEMERGER"
+    if "AMALGAMAT" in text:
+        return "AMALGAMATION"
+    if "MERGER" in text:
+        return "MERGER"
+    if "CAPITAL REDUCTION" in text:
+        return "CAPITAL_REDUCTION"
+    if "HIVE-OFF" in text or "HIVE OFF" in text:
+        return "HIVE_OFF"
+    if "SCHEME OF ARRANGEMENT" in text or "SCHEME OF ARANGEMENT" in text:
+        return "SCHEME_OF_ARRANGEMENT"
+    if "RIGHT" in text:
+        return "RIGHTS"
+    if "BUYBACK" in text or "BUY BACK" in text or "BUY-BACK" in text:
+        return "BUYBACK"
+    if "DIVIDEND" in text or re.search(r"(?:^|[/\s-])(?:INT\s+)?DIV(?:[\s/-]|$)", text):
+        return "DIVIDEND"
     return "OTHER"
 
 
-def _parse_ratio(description: str) -> tuple[Decimal | None, Decimal | None]:
+def _parse_ratio(
+    description: str, action_type: str | None = None
+) -> tuple[Decimal | None, Decimal | None]:
     match = RATIO_PATTERN.search(description)
+    if match is not None:
+        return Decimal(match.group(1)), Decimal(match.group(2))
+    if action_type in {"SPLIT", "CONSOLIDATION"}:
+        old_face_value, new_face_value = _parse_face_value_change(description)
+        if old_face_value is not None and new_face_value is not None:
+            return new_face_value, old_face_value
+    return None, None
+
+
+def _parse_face_value_change(description: str) -> tuple[Decimal | None, Decimal | None]:
+    match = FACE_VALUE_CHANGE_PATTERN.search(description)
     if match is None:
         return None, None
-    return Decimal(match.group(1)), Decimal(match.group(2))
+    old_face_value, new_face_value = Decimal(match.group(1)), Decimal(match.group(2))
+    if old_face_value <= 0 or new_face_value <= 0:
+        return None, None
+    return old_face_value, new_face_value
 
 
 def _parse_cash_value(description: str) -> Decimal | None:
@@ -500,8 +631,22 @@ def _parse_cash_value(description: str) -> Decimal | None:
     return Decimal(match.group(1).replace(",", "")) if match is not None else None
 
 
-def _corporate_action_key(symbol: str, ex_date: date, action_type: str, description: str) -> str:
-    """Return a stable natural event key; payload revisions only update its checksum."""
+def _parse_rights_issue_price(
+    description: str, face_value: Decimal | None
+) -> Decimal | None:
+    direct = RIGHTS_ISSUE_PRICE_PATTERN.search(description)
+    if direct is not None:
+        return Decimal(direct.group(1).replace(",", ""))
+    premium = RIGHTS_PREMIUM_PATTERN.search(description)
+    if premium is None:
+        return None
+    value = Decimal(premium.group(1).replace(",", ""))
+    return value + face_value if face_value is not None else value
 
-    material = f"{symbol}|{ex_date.isoformat()}|{action_type}|{description.strip()}"
+
+def _corporate_action_key(symbol: str, ex_date: date, action_type: str, description: str) -> str:
+    """Return a stable event key that survives NSE wording corrections."""
+
+    del description
+    material = f"{symbol}|{ex_date.isoformat()}|{action_type}"
     return f"NSE:{sha256(material.encode('utf-8')).hexdigest()}"

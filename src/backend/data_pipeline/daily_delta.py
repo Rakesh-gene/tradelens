@@ -228,8 +228,10 @@ class DailyDeltaService:
 
     def _action_start(self, isin: str, latest: date, fallback: date) -> date:
         checkpoint = self._repository.get_import_checkpoint(ImportJobType.CORPORATE_ACTION_BACKFILL, isin)
-        previous = checkpoint.get("last_attempted_to_date") if checkpoint else None
-        return max(fallback, previous - timedelta(days=20)) if isinstance(previous, date) else fallback
+        previous_start = checkpoint.get("last_attempted_from_date") if checkpoint else None
+        if isinstance(previous_start, date):
+            return previous_start
+        return min(fallback, latest - timedelta(days=3653))
 
     @staticmethod
     def _checkpoint(job_type, result, bars, run_id, attempted_from, attempted_to):
@@ -284,3 +286,4 @@ class DailyDeltaService:
         if request.repair_sessions <= 0: raise ValueError("repair_sessions must be positive")
         if request.as_of > self._today(): raise ValueError("as_of cannot be in the future")
         if request.max_securities is not None and request.max_securities <= 0: raise ValueError("max_securities must be positive")
+

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from data_pipeline.normalization import (
     NseDataValidationError,
     parse_corporate_actions_response,
+    parse_equity_classification_response,
     parse_equity_history_response,
     raw_bar_record,
 )
@@ -123,6 +124,23 @@ def _fixture(name: str) -> bytes:
 
 
 class NseApiClientTestCase(unittest.TestCase):
+    def test_fetch_equity_classification_uses_quote_endpoint_and_validates_identity(self) -> None:
+        opener = QueueOpener([FakeResponse(_fixture("equity_classification_valid.json"))])
+        client = NseApiClient(opener=opener, sleeper=lambda _: None)
+
+        record = client.fetch_equity_classification(" reliance ", "INE002A01018")
+
+        self.assertEqual("Oil Gas & Consumable Fuels", record.sector)
+        self.assertEqual("Refineries & Marketing", record.basic_industry)
+        self.assertEqual("/api/NextApi/apiClient/GetQuoteApi", urlparse(opener.requests[0].full_url).path)
+        query = parse_qs(urlparse(opener.requests[0].full_url).query)
+        self.assertEqual(["getSymbolData"], query["functionName"])
+
+    def test_equity_classification_rejects_an_isin_mismatch(self) -> None:
+        payload = json.loads(_fixture("equity_classification_valid.json"))
+        with self.assertRaisesRegex(NseDataValidationError, "stable security ISIN"):
+            parse_equity_classification_response(payload, "RELIANCE", "INE999A01010")
+
     def test_index_history_falls_back_to_official_nse_indices_source(self) -> None:
         opener = IndexFallbackOpener()
         client = NseApiClient(
@@ -257,6 +275,33 @@ class NseApiClientTestCase(unittest.TestCase):
         self.assertEqual(second_query["toDate"], ["04-09-2026"])
         self.assertEqual(opener.requests[0].get_header("Referer"), NseApiClient.HOME_URL)
 
+    def test_history_keeps_nse_reported_previous_close(self) -> None:
+        payload = {"data": [{
+            "chSymbol": "EXAMPLE", "chSeries": "EQ", "mtimestamp": "04-Sep-2026",
+            "chOpeningPrice": 51, "chTradeHighPrice": 52, "chTradeLowPrice": 49,
+            "chClosingPrice": 50, "chPreviousClsPrice": 50,
+            "chTotTradedQty": 1000,
+        }]}
+
+        record = parse_equity_history_response(payload, "EXAMPLE")[0]
+
+        self.assertEqual(record.previous_close_price, Decimal("50"))
+
+    def test_history_accepts_current_nested_nse_record_envelope(self) -> None:
+        row = {
+            "chSymbol": "EXAMPLE", "chSeries": "EQ", "mtimestamp": "04-Sep-2026",
+            "chOpeningPrice": 51, "chTradeHighPrice": 52, "chTradeLowPrice": 49,
+            "chClosingPrice": 50, "chTotTradedQty": 1000,
+        }
+
+        records = parse_equity_history_response({"data": {"rows": [row]}}, "EXAMPLE")
+
+        self.assertEqual(1, len(records))
+        self.assertEqual(date(2026, 9, 4), records[0].trading_date)
+
+    def test_empty_nested_nse_record_envelope_is_not_an_error(self) -> None:
+        self.assertEqual([], parse_equity_history_response({"data": {}}, "EXAMPLE"))
+
     def test_empty_history_response_returns_no_records(self) -> None:
         client = NseApiClient(opener=QueueOpener([FakeResponse(_fixture("equity_history_empty.json"))]))
 
@@ -361,13 +406,26 @@ class NseApiClientTestCase(unittest.TestCase):
         self.assertEqual(1, len(opener.requests))
         self.assertEqual(1, client.metrics["corporateActionCacheHits"])
 
+    def test_corporate_action_window_without_symbol_returns_empty(self) -> None:
+        opener = QueueOpener([FakeResponse(json.dumps({"data": [{
+            "symbol": "OTHER", "exDate": "04-Sep-2026", "subject": "Dividend Rs 1",
+        }]}).encode("utf-8"))])
+        client = NseApiClient(opener=opener, sleeper=lambda _: None)
+
+        records = client.fetch_corporate_actions(
+            "EXAMPLE", date(2026, 9, 1), date(2026, 9, 4)
+        )
+
+        self.assertEqual([], records)
+
 
 class NseNormalizationTestCase(unittest.TestCase):
     def test_corporate_actions_cover_supported_types_and_ignore_other_symbols(self) -> None:
         records = parse_corporate_actions_response(json.loads(_fixture("corporate_actions.json")), "EXAMPLE")
 
         self.assertEqual([record.action_type for record in records], [
-            "DIVIDEND", "BONUS", "SPLIT", "RIGHTS", "CONSOLIDATION", "BUYBACK", "OTHER",
+            "DIVIDEND", "BONUS", "SPLIT", "RIGHTS", "CONSOLIDATION", "BUYBACK",
+            "SCHEME_OF_ARRANGEMENT",
         ])
         self.assertEqual(records[0].cash_value, Decimal("5.00"))
         self.assertEqual((records[1].numerator, records[1].denominator), (Decimal("1"), Decimal("2")))
@@ -380,6 +438,47 @@ class NseNormalizationTestCase(unittest.TestCase):
         revised_record = parse_corporate_actions_response(revised, "EXAMPLE")[0]
         self.assertEqual(original_record.source_event_key, revised_record.source_event_key)
         self.assertNotEqual(original_record.source_checksum, revised_record.source_checksum)
+
+    def test_face_value_split_description_produces_price_multiplier(self) -> None:
+        payload = {"data": [{
+            "symbol": "SHAREINDIA",
+            "exDate": "27-Jun-2024",
+            "subject": "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share",
+        }]}
+
+        record = parse_corporate_actions_response(payload, "SHAREINDIA")[0]
+
+        self.assertEqual(record.action_type, "SPLIT")
+        self.assertEqual((record.numerator, record.denominator), (Decimal("2"), Decimal("10")))
+
+    def test_re_abbreviation_composite_and_rights_terms_are_normalized(self) -> None:
+        payload = {"data": [
+            {"symbol": "EXAMPLE", "exDate": "01-Jan-2026", "faceVal": "10",
+             "subject": "Fv Splt Frm Rs 10 To Re 1"},
+            {"symbol": "EXAMPLE", "exDate": "02-Jan-2026", "faceVal": "10",
+             "subject": "Bonus 1:1/Face Value Split From Rs 10 To Rs 2"},
+            {"symbol": "EXAMPLE", "exDate": "03-Jan-2026", "faceVal": "10",
+             "subject": "Rights 1:15 @ Premium Rs 1247"},
+            {"symbol": "EXAMPLE", "exDate": "04-Jan-2026", "faceVal": "10",
+             "subject": "Scheme Of Arrangement - Bonus Ncrps 4:1"},
+            {"symbol": "EXAMPLE", "exDate": "05-Jan-2026", "faceVal": "10",
+             "subject": "Rights 1:5 at Issue Price Rs 125"},
+            {"symbol": "EXAMPLE", "exDate": "06-Jan-2026", "faceVal": "10",
+             "subject": "Rights 1:5 @ Premium Of Rs 90"},
+        ]}
+
+        split, composite, rights, non_equity, direct_price, premium_of = parse_corporate_actions_response(
+            payload, "EXAMPLE"
+        )
+
+        self.assertEqual(split.action_type, "SPLIT")
+        self.assertEqual((split.numerator, split.denominator), (Decimal("1"), Decimal("10")))
+        self.assertEqual(composite.action_type, "BONUS_SPLIT")
+        self.assertEqual((composite.old_face_value, composite.new_face_value), (Decimal("10"), Decimal("2")))
+        self.assertEqual(rights.issue_price, Decimal("1257"))
+        self.assertEqual(non_equity.action_type, "NON_EQUITY_DISTRIBUTION")
+        self.assertEqual(direct_price.issue_price, Decimal("125"))
+        self.assertEqual(premium_of.issue_price, Decimal("100"))
 
     def test_malformed_history_fields_have_contextual_validation_errors(self) -> None:
         for fixture_name, expected_field in (

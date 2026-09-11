@@ -179,6 +179,13 @@ External exchange behavior is isolated in `data_pipeline/`.
 - Put NSE-specific HTTP headers, cookies, endpoint retry behavior, and future
   NSE calls in `NseApiClient` rather than a collector or route handler.
 - Put import orchestration and CSV validation in `NseDataCollector`.
+- Put four-level NSE company-classification orchestration in
+  `NseClassificationCollector`; it validates symbol/ISIN identity and persists
+  failures per security so one malformed response cannot stop a universe run.
+- Use NSE's `GetQuoteApi/getSymbolData` response for macro-sector, sector,
+  industry, and basic-industry fields. The legacy `quote-equity` route is
+  selectively blocked by NSE's WAF and must not be restored as the primary
+  scheduled source.
 - Keep persistence behind an explicit repository method such as
   `upsert_equities`.
 - Preserve the public scheduled-job method name `DownloadEquities()` and its
@@ -193,6 +200,15 @@ External exchange behavior is isolated in `data_pipeline/`.
   configurable through the documented environment variables.
 
 ### Opportunity ranking
+
+- Sector rotation uses `sector-rotation-v1`: median 63-session benchmark-relative
+  return on X; median 21-session RS minus one-third of median 63-session RS on Y,
+  using same-date constituents with both horizons. This is a momentum proxy,
+  not observed historical sector transitions or proprietary RRG. Membership
+  remains effective-dated. Show coverage, partial/stale status and methodology.
+- `/api/sectors/rotation` and `/api/sectors/stocks` require bearer authentication.
+  Rank stocks server-side by 3M RS descending, nulls last, ISIN ascending for
+  ties. Include stocks without active patterns; missing RS remains unranked.
 
 - Detection state and opportunity ranking are separate concerns. Rank only
   active lifecycle states (`DETECTED` through `CONFIRMED`); terminal states are
@@ -395,6 +411,9 @@ via `DATABASE_URL` in `src/backend/.env`.
   the database owns creation/update time.
 - Use stable natural identifiers for upserts where the data source provides
   one (for NSE equities, this is `isin`).
+- Industry memberships are effective-dated. Never overwrite historical
+  membership or apply a newly observed classification to dates before it was
+  imported; current NSE classifications are not a point-in-time history feed.
 - Never put a live DSN or secrets in migrations, source files, tests, docs, or
   commits. The local `.env` is intentionally git-ignored.
 
@@ -429,7 +448,7 @@ change.
 
 ### Client routes and navigation
 
-The normal route set is `/`, `/signup`, `/overview`, `/setups`,
+The normal route set is `/`, `/signup`, `/overview`, `/sector-rotation`, `/setups`,
 `/patterns/:patternId`, `/securities/:isin`, `/research`, and
 `/research/:runId` for shareable historical results.
 

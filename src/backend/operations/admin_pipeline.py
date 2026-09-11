@@ -52,6 +52,8 @@ class AdminPipelineService:
         max_workers: int = 3,
         benchmark_history=None,
         equity_collector=None,
+        classification_collector=None,
+        sector_repository=None,
     ) -> None:
         if not 1 <= max_workers <= 8:
             raise ValueError("max_workers must be between 1 and 8")
@@ -65,6 +67,8 @@ class AdminPipelineService:
         self._max_workers = max_workers
         self._benchmark_history = benchmark_history
         self._equity_collector = equity_collector
+        self._classification_collector = classification_collector
+        self._sector_repository = sector_repository
 
     def list_equities(self, query: Mapping[str, list[str]]) -> dict[str, object]:
         page = _bounded_integer(_one(query, "page"), 1, 1, 100_000, "page")
@@ -189,6 +193,8 @@ class AdminPipelineService:
         # a newly listed EQ security part of the same evening's scheduled run.
         if self._equity_collector is not None:
             self._equity_collector.download_equities(initiated_by="scheduler")
+        if self._classification_collector is not None:
+            self._classification_collector.refresh_new_and_stale()
         self.start(
             {"allEquities": True, "batchSize": batch_size, "forceRefresh": False,
              "toDate": scheduled_for.isoformat()},
@@ -258,6 +264,10 @@ class AdminPipelineService:
         if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
             return
         self._repository.update_pipeline_run(run_id, "RUNNING", started=True)
+        if self._classification_collector is not None and trigger_source != "SCHEDULED":
+            self._classification_collector.refresh_symbols(
+                [str(row.get("symbol") or "") for row in securities]
+            )
         if self._benchmark_history is not None:
             try:
                 self._benchmark_history.ensure_history(from_date, to_date)
@@ -268,6 +278,15 @@ class AdminPipelineService:
                     securities_failed=failed, error_summary=message, finished=True,
                 )
                 return
+        if (
+            self._sector_repository is not None
+            and hasattr(self._recovery, "prepare_security")
+            and hasattr(self._recovery, "scan_prepared_security")
+        ):
+            return self._execute_with_sector_barrier(
+                run_id, securities, from_date, to_date, versions, force_refresh,
+                batch_size, completed=completed, trigger_source=trigger_source,
+            )
         with ThreadPoolExecutor(
             max_workers=self._max_workers, thread_name_prefix="admin-pipeline-equity"
         ) as pool:
@@ -302,6 +321,11 @@ class AdminPipelineService:
                     )
                 if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
                     return
+        if self._sector_repository is not None:
+            try:
+                self._sector_repository.refresh_sector_snapshots(to_date, versions.feature)
+            except Exception as error:
+                errors.append(f"Sector snapshot refresh: {str(error)[:500]}")
         status = "PARTIAL" if completed and failed else "FAILED" if failed else "COMPLETED"
         self._repository.update_pipeline_run(
             run_id, status, securities_completed=completed, securities_failed=failed,
@@ -313,6 +337,137 @@ class AdminPipelineService:
                 job_type="ADMIN_FULL_PIPELINE", source_status=status,
                 row_count=completed, details={"adminPipelineRunId": run_id, "failed": failed},
             )
+
+    def _execute_with_sector_barrier(
+        self, run_id, securities, from_date, to_date, versions, force_refresh,
+        batch_size, *, completed=0, trigger_source="MANUAL",
+    ):
+        """Prepare the universe, materialize sector breadth, then scan it."""
+
+        failed = 0
+        errors = []
+        prepared_rows = []
+        with ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="admin-pipeline-prepare") as pool:
+            for batch in _batches(securities, batch_size):
+                if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
+                    return
+                futures = {
+                    pool.submit(self._prepare_security, run_id, security, from_date, to_date,
+                                versions, force_refresh, trigger_source): security
+                    for security in batch
+                }
+                for future in as_completed(futures):
+                    success, symbol, prepared, message = future.result()
+                    if success:
+                        prepared_rows.append(prepared)
+                    else:
+                        failed += 1
+                        errors.append(f"{symbol}: {message}")
+                    self._repository.update_pipeline_run(
+                        run_id, "RUNNING", securities_failed=failed
+                    )
+        try:
+            for as_of in sorted({row["asOf"] for row in prepared_rows}):
+                self._sector_repository.refresh_sector_snapshots(as_of, versions.feature)
+        except Exception as error:
+            message = f"Sector context refresh failed: {str(error).replace(chr(10), ' ')[:900]}"
+            for prepared in prepared_rows:
+                self._repository.update_pipeline_item(
+                    run_id, prepared["isin"], "FAILED", "FAILED",
+                    error_message=message, finished=True,
+                )
+            failed += len(prepared_rows)
+            errors.append(message)
+            self._repository.update_pipeline_run(
+                run_id, "FAILED", securities_completed=completed,
+                securities_failed=failed, error_summary="; ".join(errors[:20]),
+                finished=True,
+            )
+            return
+        with ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="admin-pipeline-scan") as pool:
+            for batch in _batches(prepared_rows, batch_size):
+                if self._repository.pipeline_run_status(run_id) in {"PAUSED", "TERMINATED"}:
+                    return
+                futures = {pool.submit(self._scan_prepared_security, run_id, row): row for row in batch}
+                for future in as_completed(futures):
+                    success, symbol, message = future.result()
+                    if success:
+                        completed += 1
+                    else:
+                        failed += 1
+                        errors.append(f"{symbol}: {message}")
+                    self._repository.update_pipeline_run(
+                        run_id, "RUNNING", securities_completed=completed,
+                        securities_failed=failed,
+                    )
+        status = "PARTIAL" if completed and failed else "FAILED" if failed else "COMPLETED"
+        self._repository.update_pipeline_run(
+            run_id, status, securities_completed=completed, securities_failed=failed,
+            error_summary="; ".join(errors[:20]) or None, finished=True,
+        )
+        if self._logger:
+            self._logger.emit(
+                "admin_pipeline_completed", level="ERROR" if failed else "INFO",
+                job_type="ADMIN_FULL_PIPELINE", source_status=status,
+                row_count=completed, details={"adminPipelineRunId": run_id, "failed": failed},
+            )
+
+    def _prepare_security(
+        self, run_id, security, from_date, to_date, versions, force_refresh,
+        trigger_source,
+    ):
+        isin, symbol = str(security["isin"]), str(security["symbol"])
+        try:
+            self._repository.update_pipeline_item(run_id, isin, "RUNNING", "SOURCE_IMPORT", started=True)
+            imported = self._history.run(BackfillRequest(
+                from_date=from_date, to_date=to_date, isin=isin, batch_size=1,
+                force=force_refresh,
+                initiated_by="scheduler" if trigger_source == "SCHEDULED" else "manual",
+            ))
+            item = imported.securities[0] if imported.securities else None
+            if imported.status not in {ImportStatus.COMPLETED, None} or item is None or item.error:
+                raise RuntimeError(item.error if item and item.error else "Source import did not complete")
+            self._repository.update_pipeline_item(
+                run_id, isin, "RUNNING", "ADJUST_FEATURE", history_run_id=imported.run_id,
+                rows_downloaded=item.rows_downloaded,
+            )
+            prepared = self._recovery.prepare_security(isin, from_date, to_date, versions)
+            prepared = {**prepared, "symbol": symbol, "historyRunId": imported.run_id,
+                        "rowsDownloaded": item.rows_downloaded}
+            self._repository.update_pipeline_item(run_id, isin, "PREPARED", "SECTOR_CONTEXT")
+            return True, symbol, prepared, None
+        except Exception as error:
+            message = str(error).replace("\n", " ")[:1000]
+            self._repository.update_pipeline_item(
+                run_id, isin, "FAILED", "FAILED", error_message=message, finished=True
+            )
+            return False, symbol, None, message
+
+    def _scan_prepared_security(self, run_id, prepared):
+        isin, symbol = str(prepared["isin"]), str(prepared["symbol"])
+        rebuilt = None
+        try:
+            self._repository.update_pipeline_item(run_id, isin, "RUNNING", "PATTERN_SCAN")
+            rebuilt = self._recovery.scan_prepared_security(prepared)
+            if rebuilt.get("status") not in {ImportStatus.COMPLETED.value, ImportStatus.PARTIAL.value}:
+                detail = "; ".join(item.get("reason", "") for item in rebuilt.get("failures", []) if item.get("reason"))
+                raise RuntimeError(f"Pattern scan failed: {detail}" if detail else f"Pattern scan finished with {rebuilt.get('status')}")
+            self._repository.update_pipeline_item(
+                run_id, isin, "COMPLETED", "COMPLETED",
+                history_run_id=prepared.get("historyRunId"), pattern_run_id=rebuilt.get("runId"),
+                rows_downloaded=prepared.get("rowsDownloaded", 0),
+                candidates_detected=int(rebuilt.get("metrics", {}).get("candidatesDetected") or 0),
+                finished=True,
+            )
+            return True, symbol, None
+        except Exception as error:
+            message = str(error).replace("\n", " ")[:1000]
+            self._repository.update_pipeline_item(
+                run_id, isin, "FAILED", "FAILED",
+                pattern_run_id=rebuilt.get("runId") if rebuilt else None,
+                error_message=message, finished=True,
+            )
+            return False, symbol, message
 
     def _process_security(
         self, run_id, security, from_date, to_date, versions, force_refresh,
@@ -407,6 +562,9 @@ def _equity_payload(row):
         "listedOn": row.get("listed_on"), "latestRawDate": row.get("latest_raw_date"),
         "lastPipelineStatus": row.get("last_pipeline_status"),
         "lastPipelineAt": row.get("last_pipeline_at"),
+        "sectorCode": row.get("sector_code"), "sectorName": row.get("sector_name"),
+        "basicIndustryName": row.get("basic_industry_name"),
+        "classificationStatus": row.get("classification_status") or "MISSING",
     }
 
 
@@ -421,6 +579,7 @@ def _run_payload(row, *, include_items, item_page=1, item_page_size=25):
         "batchSize": row.get("batch_size") or AdminPipelineService.DEFAULT_BATCH_SIZE,
         "securitiesTotal": row.get("securities_total", 0),
         "securitiesCompleted": row.get("securities_completed", 0),
+        "securitiesPrepared": row.get("securities_prepared", 0),
         "securitiesFailed": row.get("securities_failed", 0),
         "errorSummary": row.get("error_summary"), "createdAt": row.get("created_at"),
         "startedAt": row.get("started_at"), "finishedAt": row.get("finished_at"),

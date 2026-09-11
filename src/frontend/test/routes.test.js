@@ -4,6 +4,7 @@ import { buildPatternPath, buildSecurityPath, matchRoute } from '../src/routing/
 
 test('matches static and valid dynamic routes', () => {
   assert.equal(matchRoute('/overview/').name, 'overview')
+  assert.equal(matchRoute('/sector-rotation/').name, 'sector-rotation')
   assert.equal(matchRoute('/profile').name, 'profile')
   assert.deepEqual(matchRoute('/patterns/2a9ca55f-3d2d-4b25-b683-36979029fb97').params, {
     patternId: '2a9ca55f-3d2d-4b25-b683-36979029fb97',

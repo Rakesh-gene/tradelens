@@ -116,6 +116,7 @@
   --size-overview-card-min-block: 10rem;
   --size-app-header: 4.75rem;
   --size-touch-target: 2.75rem;
+  --size-select-chevron: 0.42rem;
 
   /* Spacing scale. Use these for padding, margin, gap, inset, and offsets. */
   --space-0: 0;
@@ -161,6 +162,7 @@
   --space-form-row-gap: var(--space-14);
   --space-control-inline: var(--space-15);
   --space-control-block: var(--space-14);
+  --space-select-inline-end: 2.65rem;
   --space-button-inline: var(--space-17);
   --space-button-block: var(--space-13);
 
@@ -174,6 +176,7 @@
   --layout-content-max: 90rem;
   --layout-reading-max: 48rem;
   --layout-filter-control-min: 10rem;
+  --layout-select-control-inline: 17rem;
   --layout-admin-table-min: 58rem;
   --layout-copy-max: 36rem;
   --layout-overview-copy-max: 48rem;

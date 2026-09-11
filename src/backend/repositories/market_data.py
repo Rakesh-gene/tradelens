@@ -43,12 +43,28 @@ class MarketDataRepository(Protocol):
     ) -> list[dict[str, object]]:
         ...
 
+    def resolve_corporate_action(
+        self, source_event_key: str, price_factor: object,
+        volume_factor: object, resolution_note: str,
+    ) -> dict[str, object]:
+        ...
+
+    def list_unresolved_corporate_actions(
+        self, limit: int = 500
+    ) -> list[dict[str, object]]:
+        ...
+
     def load_raw_bars(self, isin: str, from_date: date, to_date: date) -> list[dict[str, object]]:
         ...
 
     def load_adjusted_bars(
         self, isin: str, from_date: date, to_date: date, adjustment_version: str
     ) -> list[dict[str, object]]:
+        ...
+
+    def resolve_adjustment_version(
+        self, isin: str, as_of_date: date, requested_version: str
+    ) -> str | None:
         ...
 
     def upsert_adjusted_bars(self, bars: Sequence[Mapping[str, object]]) -> int:
@@ -134,6 +150,9 @@ class MarketDataRepository(Protocol):
     def load_sector_snapshot(self, isin: str, as_of_date: date) -> dict[str, object] | None:
         ...
 
+    def refresh_sector_snapshots(self, as_of_date: date, feature_version: str) -> int:
+        ...
+
     def update_pattern_scan_metrics(self, run_id: str, metrics: Mapping[str, object]) -> None:
         ...
 
@@ -207,11 +226,13 @@ class PostgresMarketDataRepository:
             INSERT INTO nse_corporate_actions (
                 source_event_key, isin, source_isin, symbol, action_type, ex_date, record_date,
                 announcement_date, numerator, denominator, cash_value, currency,
+                face_value, issue_price, old_face_value, new_face_value,
                 raw_description, raw_payload, source_checksum, import_run_id
             ) VALUES (
                 %(source_event_key)s, %(isin)s, %(source_isin)s, %(symbol)s, %(action_type)s, %(ex_date)s,
                 %(record_date)s, %(announcement_date)s, %(numerator)s, %(denominator)s,
-                %(cash_value)s, %(currency)s, %(raw_description)s,
+                %(cash_value)s, %(currency)s, %(face_value)s, %(issue_price)s,
+                %(old_face_value)s, %(new_face_value)s, %(raw_description)s,
                 %(raw_payload)s::jsonb, %(source_checksum)s, %(import_run_id)s
             )
             ON CONFLICT (source_event_key) DO UPDATE SET
@@ -226,12 +247,23 @@ class PostgresMarketDataRepository:
                 denominator = EXCLUDED.denominator,
                 cash_value = EXCLUDED.cash_value,
                 currency = EXCLUDED.currency,
+                face_value = EXCLUDED.face_value,
+                issue_price = EXCLUDED.issue_price,
+                old_face_value = EXCLUDED.old_face_value,
+                new_face_value = EXCLUDED.new_face_value,
                 raw_description = EXCLUDED.raw_description,
                 raw_payload = EXCLUDED.raw_payload,
                 source_checksum = EXCLUDED.source_checksum,
                 import_run_id = EXCLUDED.import_run_id,
                 updated_at = NOW()
             WHERE nse_corporate_actions.source_checksum IS DISTINCT FROM EXCLUDED.source_checksum
+               OR nse_corporate_actions.action_type IS DISTINCT FROM EXCLUDED.action_type
+               OR nse_corporate_actions.numerator IS DISTINCT FROM EXCLUDED.numerator
+               OR nse_corporate_actions.denominator IS DISTINCT FROM EXCLUDED.denominator
+               OR nse_corporate_actions.cash_value IS DISTINCT FROM EXCLUDED.cash_value
+               OR nse_corporate_actions.issue_price IS DISTINCT FROM EXCLUDED.issue_price
+               OR nse_corporate_actions.old_face_value IS DISTINCT FROM EXCLUDED.old_face_value
+               OR nse_corporate_actions.new_face_value IS DISTINCT FROM EXCLUDED.new_face_value
         """
         with self._connect() as connection:
             with connection.cursor() as cursor:
@@ -248,14 +280,107 @@ class PostgresMarketDataRepository:
         statement = """
             SELECT source_event_key, isin, source_isin, symbol, action_type, ex_date, record_date,
                    announcement_date, numerator, denominator, cash_value, currency,
+                   face_value, issue_price, old_face_value, new_face_value,
+                   manual_price_factor, manual_volume_factor, resolution_note, resolved_at,
                    raw_description, raw_payload, source_checksum, import_run_id,
                    imported_at, updated_at
-            FROM nse_corporate_actions
-            WHERE isin = %s AND ex_date >= %s AND ex_date <= %s
-              AND (%s::timestamptz IS NULL OR imported_at <= %s::timestamptz)
+            FROM (
+                SELECT action.*,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY isin, ex_date, action_type,
+                               CASE
+                                   WHEN action_type = 'DIVIDEND'
+                                       THEN COALESCE(cash_value::text, source_event_key)
+                                   WHEN action_type IN (
+                                       'SPLIT', 'CONSOLIDATION', 'BONUS', 'BONUS_SPLIT',
+                                       'RIGHTS', 'DEMERGER', 'MERGER', 'AMALGAMATION',
+                                       'CAPITAL_REDUCTION', 'HIVE_OFF',
+                                       'SCHEME_OF_ARRANGEMENT', 'NON_EQUITY_DISTRIBUTION'
+                                   ) THEN ''
+                                   ELSE source_event_key
+                               END
+                           ORDER BY updated_at DESC, imported_at DESC, source_event_key
+                       ) AS economic_duplicate_rank
+                FROM nse_corporate_actions AS action
+                WHERE isin = %s AND ex_date >= %s AND ex_date <= %s
+                  AND (%s::timestamptz IS NULL OR imported_at <= %s::timestamptz)
+            ) AS ranked
+            WHERE economic_duplicate_rank = 1
             ORDER BY ex_date, source_event_key
         """
         return self._fetch_all(statement, (isin, from_date, to_date, as_of, as_of))
+
+    def resolve_corporate_action(
+        self, source_event_key, price_factor, volume_factor, resolution_note,
+    ):
+        statement = """
+            UPDATE nse_corporate_actions
+            SET manual_price_factor = %s, manual_volume_factor = %s,
+                resolution_note = %s, resolved_at = NOW(), updated_at = NOW()
+            WHERE source_event_key = %s
+            RETURNING *
+        """
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(statement, (
+                    price_factor, volume_factor, resolution_note, source_event_key,
+                ))
+                row = cursor.fetchone()
+                if row is None:
+                    raise LookupError("Corporate action not found")
+                columns = [column.name for column in cursor.description]
+            connection.commit()
+        return dict(row) if isinstance(row, Mapping) else dict(zip(columns, row))
+
+    def list_unresolved_corporate_actions(self, limit=500):
+        return self._fetch_all(
+            """
+            WITH ranked AS (
+                SELECT action.*,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY isin, ex_date, action_type
+                           ORDER BY updated_at DESC, imported_at DESC, source_event_key
+                       ) AS economic_duplicate_rank
+                FROM nse_corporate_actions AS action
+                WHERE action_type IN (
+                    'SPLIT', 'CONSOLIDATION', 'BONUS', 'BONUS_SPLIT', 'RIGHTS',
+                    'DEMERGER', 'MERGER', 'AMALGAMATION', 'CAPITAL_REDUCTION',
+                    'HIVE_OFF', 'SCHEME_OF_ARRANGEMENT',
+                    'NON_EQUITY_DISTRIBUTION'
+                )
+            )
+            SELECT action.source_event_key, action.isin, equity.symbol,
+                   action.action_type, action.ex_date, action.raw_description,
+                   action.numerator, action.denominator, action.issue_price,
+                   action.manual_price_factor, action.resolution_note
+            FROM ranked AS action
+            JOIN nse_equities AS equity ON equity.isin = action.isin
+            WHERE action.economic_duplicate_rank = 1
+              AND action.manual_price_factor IS NULL
+              AND (
+                  action.action_type IN (
+                      'DEMERGER', 'MERGER', 'AMALGAMATION', 'CAPITAL_REDUCTION',
+                      'HIVE_OFF', 'SCHEME_OF_ARRANGEMENT',
+                      'NON_EQUITY_DISTRIBUTION'
+                  )
+                  OR action.action_type IN ('SPLIT', 'CONSOLIDATION', 'BONUS')
+                     AND (action.numerator IS NULL OR action.denominator IS NULL)
+                  OR action.action_type = 'BONUS_SPLIT'
+                     AND (
+                         action.numerator IS NULL OR action.denominator IS NULL
+                         OR action.old_face_value IS NULL OR action.new_face_value IS NULL
+                     )
+                  OR action.action_type = 'RIGHTS'
+                     AND (
+                         action.numerator IS NULL OR action.denominator IS NULL
+                         OR action.issue_price IS NULL
+                     )
+              )
+            ORDER BY action.ex_date DESC, equity.symbol, action.source_event_key
+            LIMIT %s
+            """,
+            (limit,),
+        )
 
     def load_adjusted_bars(
         self, isin: str, from_date: date, to_date: date, adjustment_version: str
@@ -272,6 +397,26 @@ class PostgresMarketDataRepository:
             ORDER BY adjusted.trading_date
         """
         return self._fetch_all(statement, (isin, from_date, to_date, adjustment_version))
+
+    def resolve_adjustment_version(self, isin, as_of_date, requested_version):
+        rows = self._fetch_all(
+            """
+            SELECT adjustment_version
+            FROM adjusted_daily_bars
+            WHERE isin = %s AND trading_date <= %s
+              AND (
+                  adjustment_version = %s
+                  OR adjustment_version LIKE %s::text || ':%'
+              )
+            GROUP BY adjustment_version
+            ORDER BY
+                CASE WHEN adjustment_version = %s THEN 0 ELSE 1 END,
+                MAX(generated_at) DESC
+            LIMIT 1
+            """,
+            (isin, as_of_date, requested_version, requested_version, requested_version),
+        )
+        return str(rows[0]["adjustment_version"]) if rows else None
 
     def upsert_adjusted_bars(self, bars: Sequence[Mapping[str, object]]) -> int:
         if not bars:
@@ -681,18 +826,108 @@ class PostgresMarketDataRepository:
     def load_sector_snapshot(self, isin: str, as_of_date: date) -> dict[str, object] | None:
         rows = self._fetch_all(
             """
-            SELECT membership.sector_code, sector.name AS sector_name
+            SELECT membership.sector_code, sector.name AS sector_name,
+                   macro.code AS macro_sector_code, macro.name AS macro_sector_name,
+                   industry.code AS industry_code, industry.name AS industry_name,
+                   basic.code AS basic_industry_code, basic.name AS basic_industry_name,
+                   snapshot.trading_date AS sector_snapshot_date,
+                   snapshot.sector_strength_score, snapshot.coverage_pct,
+                   snapshot.above_ema20_pct, snapshot.above_sma50_pct,
+                   snapshot.above_sma200_pct, snapshot.median_relative_strength,
+                   COALESCE(refresh.status, 'MISSING') AS classification_status
             FROM security_sector_memberships AS membership
             JOIN market_sectors AS sector ON sector.code = membership.sector_code
+            LEFT JOIN market_macro_sectors macro ON macro.code = sector.macro_sector_code
+            LEFT JOIN security_industry_memberships sim ON sim.isin = membership.isin
+              AND sim.effective_from <= %s
+              AND (sim.effective_to IS NULL OR sim.effective_to >= %s)
+            LEFT JOIN market_basic_industries basic ON basic.code = sim.basic_industry_code
+            LEFT JOIN market_industries industry ON industry.code = basic.industry_code
+            LEFT JOIN equity_classification_refresh_state refresh ON refresh.isin = membership.isin
+            LEFT JOIN LATERAL (
+                SELECT daily.* FROM sector_daily_snapshots daily
+                WHERE daily.sector_code = membership.sector_code
+                  AND daily.trading_date <= %s
+                ORDER BY daily.trading_date DESC, daily.generated_at DESC LIMIT 1
+            ) snapshot ON TRUE
             WHERE membership.isin = %s
               AND membership.effective_from <= %s
               AND (membership.effective_to IS NULL OR membership.effective_to >= %s)
             ORDER BY membership.effective_from DESC, membership.sector_code
             LIMIT 1
             """,
-            (isin, as_of_date, as_of_date),
+            (as_of_date, as_of_date, as_of_date, isin, as_of_date, as_of_date),
         )
         return rows[0] if rows else None
+
+    def refresh_sector_snapshots(self, as_of_date: date, feature_version: str) -> int:
+        """Materialize same-session equal-weight breadth for every classified sector."""
+
+        statement = """
+            WITH members AS (
+                SELECT membership.sector_code, membership.isin
+                FROM security_sector_memberships membership
+                JOIN nse_equities equity ON equity.isin = membership.isin AND equity.series = 'EQ'
+                WHERE membership.effective_from <= %(as_of)s
+                  AND (membership.effective_to IS NULL OR membership.effective_to >= %(as_of)s)
+            ), observations AS (
+                SELECT members.sector_code, members.isin, bar.close_price,
+                       feature.ema_20, feature.sma_50, feature.sma_200,
+                       feature.relative_strength_percentile
+                FROM members
+                LEFT JOIN technical_features feature ON feature.isin = members.isin
+                  AND feature.trading_date = %(as_of)s AND feature.feature_version = %(version)s
+                LEFT JOIN adjusted_daily_bars bar ON bar.isin = feature.isin
+                  AND bar.trading_date = feature.trading_date
+                  AND bar.adjustment_version = feature.data_version
+            ), aggregate AS (
+                SELECT sector_code, COUNT(*) AS eligible_members,
+                       COUNT(close_price) AS covered_members,
+                       COUNT(close_price)::numeric / NULLIF(COUNT(*), 0) * 100 AS coverage_pct,
+                       AVG(CASE WHEN close_price > ema_20 THEN 100.0 ELSE 0.0 END) FILTER (WHERE ema_20 IS NOT NULL) AS above_ema20_pct,
+                       AVG(CASE WHEN close_price > sma_50 THEN 100.0 ELSE 0.0 END) FILTER (WHERE sma_50 IS NOT NULL) AS above_sma50_pct,
+                       AVG(CASE WHEN close_price > sma_200 THEN 100.0 ELSE 0.0 END) FILTER (WHERE sma_200 IS NOT NULL) AS above_sma200_pct,
+                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY relative_strength_percentile) FILTER (WHERE relative_strength_percentile IS NOT NULL) AS median_rs
+                FROM observations GROUP BY sector_code
+            )
+            INSERT INTO sector_daily_snapshots (
+                sector_code, trading_date, eligible_members, covered_members, coverage_pct,
+                above_ema20_pct, above_sma50_pct, above_sma200_pct,
+                median_relative_strength, sector_strength_score, methodology_version
+            )
+            SELECT sector_code, %(as_of)s, eligible_members, covered_members, coverage_pct,
+                   above_ema20_pct, above_sma50_pct, above_sma200_pct, median_rs,
+                   CASE WHEN coverage_pct >= 60 THEN
+                       (COALESCE(above_ema20_pct, 0) + COALESCE(above_sma50_pct, 0)
+                        + COALESCE(above_sma200_pct, 0) + COALESCE(median_rs, 0)) /
+                       NULLIF(
+                           (above_ema20_pct IS NOT NULL)::integer
+                           + (above_sma50_pct IS NOT NULL)::integer
+                           + (above_sma200_pct IS NOT NULL)::integer
+                           + (median_rs IS NOT NULL)::integer,
+                           0
+                       )
+                   END,
+                   'sector-breadth-v1'
+            FROM aggregate
+            ON CONFLICT (sector_code, trading_date, methodology_version) DO UPDATE SET
+                eligible_members = EXCLUDED.eligible_members,
+                covered_members = EXCLUDED.covered_members,
+                coverage_pct = EXCLUDED.coverage_pct,
+                above_ema20_pct = EXCLUDED.above_ema20_pct,
+                above_sma50_pct = EXCLUDED.above_sma50_pct,
+                above_sma200_pct = EXCLUDED.above_sma200_pct,
+                median_relative_strength = EXCLUDED.median_relative_strength,
+                sector_strength_score = EXCLUDED.sector_strength_score,
+                generated_at = NOW()
+            RETURNING sector_code
+        """
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(statement, {"as_of": as_of_date, "version": feature_version})
+                count = len(cursor.fetchall())
+            connection.commit()
+        return count
 
     def update_pattern_scan_metrics(self, run_id: str, metrics: Mapping[str, object]) -> None:
         self._execute(
@@ -746,11 +981,11 @@ class PostgresMarketDataRepository:
         statement = """
             INSERT INTO nse_daily_bars_raw (
                 isin, source_isin, trading_date, open_price, high_price, low_price, close_price,
-                volume, deliverable_quantity, delivery_percentage, nse_series,
+                previous_close_price, volume, deliverable_quantity, delivery_percentage, nse_series,
                 source_name, source_checksum, source_published_at, import_run_id
             ) VALUES (
                 %(isin)s, %(source_isin)s, %(trading_date)s, %(open_price)s, %(high_price)s, %(low_price)s,
-                %(close_price)s, %(volume)s, %(deliverable_quantity)s,
+                %(close_price)s, %(previous_close_price)s, %(volume)s, %(deliverable_quantity)s,
                 %(delivery_percentage)s, %(nse_series)s, %(source_name)s,
                 %(source_checksum)s, %(source_published_at)s, %(import_run_id)s
             )
@@ -760,6 +995,7 @@ class PostgresMarketDataRepository:
                 high_price = EXCLUDED.high_price,
                 low_price = EXCLUDED.low_price,
                 close_price = EXCLUDED.close_price,
+                previous_close_price = EXCLUDED.previous_close_price,
                 volume = EXCLUDED.volume,
                 deliverable_quantity = EXCLUDED.deliverable_quantity,
                 delivery_percentage = EXCLUDED.delivery_percentage,
@@ -771,6 +1007,7 @@ class PostgresMarketDataRepository:
                 raw_revision = nse_daily_bars_raw.raw_revision + 1,
                 imported_at = NOW()
             WHERE nse_daily_bars_raw.source_checksum IS DISTINCT FROM EXCLUDED.source_checksum
+               OR nse_daily_bars_raw.previous_close_price IS DISTINCT FROM EXCLUDED.previous_close_price
         """
         cursor.executemany(statement, [self._raw_bar_parameters(bar) for bar in bars])
 
@@ -784,6 +1021,7 @@ class PostgresMarketDataRepository:
             "high_price": bar["high_price"],
             "low_price": bar["low_price"],
             "close_price": bar["close_price"],
+            "previous_close_price": bar.get("previous_close_price"),
             "volume": bar["volume"],
             "deliverable_quantity": bar.get("deliverable_quantity"),
             "delivery_percentage": bar.get("delivery_percentage"),
@@ -809,6 +1047,10 @@ class PostgresMarketDataRepository:
             "denominator": action.get("denominator"),
             "cash_value": action.get("cash_value"),
             "currency": action.get("currency"),
+            "face_value": action.get("face_value"),
+            "issue_price": action.get("issue_price"),
+            "old_face_value": action.get("old_face_value"),
+            "new_face_value": action.get("new_face_value"),
             "raw_description": action.get("raw_description"),
             "raw_payload": json.dumps(serialize_value(action.get("raw_payload", {})), sort_keys=True),
             "source_checksum": action["source_checksum"],
