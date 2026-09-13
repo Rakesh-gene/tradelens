@@ -40,9 +40,10 @@ test('setup filters validate visible fields and omit removed advanced filters', 
 test('domain formatters preserve percentages and nulls', () => {
   assert.match(formatPrice(1234.5), /1,234\.50/)
   assert.equal(formatPercent(1.7), '1.7%')
+  assert.equal(formatPercent(1.23456), '1.235%')
   assert.equal(formatPercent(1.7, { signed: true }), '+1.7%')
   assert.equal(formatScore(null), 'Not available')
-  assert.match(formatCompactNumber(125000), /1\.3L|125K/)
+  assert.match(formatCompactNumber(125000), /1\.25L|125K/)
 })
 
 test('lifecycle tone remains readable for known and future states', () => {

@@ -3300,6 +3300,25 @@ INVALIDATED
 EXPIRED
 ```
 
+After every successfully completed security scan, reconcile the active set
+against the pattern instances observed by that scan. A detector result that is
+matched or created records its instance as observed. For each scanned
+timeframe:
+
+- transient trend, compression, momentum, and failure evidence that is no
+  longer observed becomes `EXPIRED`;
+- bases, pullbacks, reversals, and harmonics that are no longer observed become
+  `INVALIDATED`, unless a family expiry rule has already made them `EXPIRED`;
+- triggered and confirmed breakouts remain governed by their explicit retention
+  windows rather than disappearing immediately;
+- skipped, failed, and dry-run scans do not reconcile production instances;
+- timeframes omitted from a scan are not reconciled by that scan.
+
+Active instances whose engine, configuration, feature, or adjustment lineage
+does not match the current production calculation are `INVALIDATED` before new
+candidates are persisted. Terminal rows and their events remain immutable
+historical evidence; reconciliation never hard-deletes them.
+
 ---
 
 # 136. Pattern Expiry
@@ -3326,6 +3345,13 @@ Expire after:
 ```
 
 if no valid retest occurred.
+
+### Breakout
+
+An unconfirmed `TRIGGERED` breakout expires after the configured five-session
+failure/confirmation window. A `CONFIRMED` breakout expires after the configured
+30-session breakout-retest window. The trigger date, rather than the resistance
+structure's start date, is the age anchor.
 
 ### EMA20 Pullback
 
@@ -3905,3 +3931,35 @@ Historical outcome
 ```
 
 This document should be treated as the initial canonical contract for the pattern-analysis engine. Numeric thresholds should be implemented as configurable defaults and validated through historical backtesting before the platform makes any claims about the effectiveness of a setup.
+
+# 153. Multi-timeframe pattern discovery extension
+
+The Pattern scanner adds completed 1D, 1W, and 1M intervals without changing
+the V1 setup taxonomy. Weekly and monthly OHLCV is derived from
+corporate-action-adjusted daily bars. The current calendar week or month is
+excluded until that interval closes; every stored result includes timeframe,
+pattern_group, direction, and interval_complete.
+
+The first classical reversal identifiers are:
+
+    REV-DBOT  Double bottom, bullish
+    REV-DTOP  Double top, bearish
+
+Both require three alternating, confirmed, meaningful swings. The two outer
+pivots must be within the configured similarity tolerance, the intervening
+neckline must satisfy the configured minimum depth, and the total duration must
+remain within the configured interval-bar window. The pattern is READY before
+a buffered neckline close and TRIGGERED after it. Configuration version v2
+owns these thresholds.
+
+The first harmonic identifier is HARM-ABCD. It requires four alternating,
+confirmed swings, configured CD-to-AB equality bounds, and configured BC
+retracement bounds. Point C is the trigger level after point D completes. The
+stored evidence includes every pivot date, leg size, and measured ratio.
+
+The remaining scanner inventory is staged in this order: head and shoulders
+and inverse head and shoulders; flags, pennants, wedges, channels, triangles,
+rectangles, cup-and-handle and rounding structures; Gartley, Bat, Butterfly,
+Crab, Cypher, Shark, and 5-0 harmonic families; then candlestick combinations. A family is
+shown as live only after positive, negative, boundary, and look-ahead fixtures
+pass for every supported interval.

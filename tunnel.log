@@ -1,0 +1,3 @@
+TradeLens frontend is ready: http://127.0.0.1:5004
+TradeLens API is ready: http://127.0.0.1:9004/api/health
+Connecting https://tradelens.othla.in to http://localhost:5004. Press Ctrl+C to stop this TradeLens connector.

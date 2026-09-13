@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+from time import sleep
 from http.server import ThreadingHTTPServer
 
 from auth.service import AuthService, UserRepository
 from repositories.memory import InMemoryUserRepository
-from repositories.postgres import PostgresUserRepository
+from repositories.postgres import PostgresUserRepository, psycopg
 from repositories.pattern_queries import InMemoryPatternQueryRepository, PostgresPatternQueryRepository
 from repositories.equities import PostgresEquityRepository
 from repositories.market_data import PostgresMarketDataRepository
@@ -58,8 +59,27 @@ load_local_environment()
 def build_repository() -> UserRepository:
     dsn = os.getenv("DATABASE_URL")
     if dsn:
-        return PostgresUserRepository(dsn)
+        attempts = _startup_integer('DATABASE_STARTUP_ATTEMPTS', 6, 1, 30)
+        delay_seconds = _startup_integer('DATABASE_STARTUP_DELAY_SECONDS', 5, 0, 60)
+        for attempt in range(1, attempts + 1):
+            try:
+                return PostgresUserRepository(dsn)
+            except Exception as error:
+                transient = psycopg is not None and isinstance(error, psycopg.OperationalError)
+                if not transient or attempt == attempts:
+                    raise
+                sleep(delay_seconds)
     return InMemoryUserRepository()
+
+
+def _startup_integer(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as error:
+        raise ValueError(f'{name} must be an integer') from error
+    if value < minimum or value > maximum:
+        raise ValueError(f'{name} must be between {minimum} and {maximum}')
+    return value
 
 
 def create_server(host: str = HOST, port: int = PORT, repository: UserRepository | None = None, pattern_repository=None, research_repository=None, replay_evaluator=None, admin_pipeline_service=None) -> ThreadingHTTPServer:
@@ -131,6 +151,8 @@ def create_pipeline_scheduler(server: ThreadingHTTPServer):
         return None
     schedule_time = parse_schedule_time(os.getenv("PIPELINE_SCHEDULE_TIME", "19:00"))
     batch_size = int(os.getenv("PIPELINE_SCHEDULE_BATCH_SIZE", "25"))
+    nse_client = NseApiClient()
     return DailyPipelineScheduler(
-        service, schedule_time=schedule_time, batch_size=batch_size
+        service, schedule_time=schedule_time, batch_size=batch_size,
+        is_trading_day=nse_client.is_equity_trading_day,
     )

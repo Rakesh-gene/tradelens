@@ -124,6 +124,18 @@ def _fixture(name: str) -> bytes:
 
 
 class NseApiClientTestCase(unittest.TestCase):
+    def test_equity_trading_day_uses_cash_market_holidays_and_caches_the_year(self) -> None:
+        opener = QueueOpener([FakeResponse(json.dumps({
+            "CM": [{"tradingDate": "26-Jan-2026"}], "FO": [],
+        }).encode())])
+        client = NseApiClient(opener=opener, sleeper=lambda _: None)
+
+        self.assertFalse(client.is_equity_trading_day(date(2026, 1, 26)))
+        self.assertTrue(client.is_equity_trading_day(date(2026, 1, 27)))
+        self.assertFalse(client.is_equity_trading_day(date(2026, 1, 25)))
+        self.assertEqual(1, len(opener.requests))
+        self.assertEqual("/api/holiday-master", urlparse(opener.requests[0].full_url).path)
+
     def test_fetch_equity_classification_uses_quote_endpoint_and_validates_identity(self) -> None:
         opener = QueueOpener([FakeResponse(_fixture("equity_classification_valid.json"))])
         client = NseApiClient(opener=opener, sleeper=lambda _: None)

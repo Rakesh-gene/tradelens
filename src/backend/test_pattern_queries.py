@@ -62,6 +62,19 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 0 and 100"):
             self.service.setups({"minSetupScore": ["101"]})
 
+    def test_setups_default_to_setup_group_while_scanner_can_search_all_groups(self):
+        reversal = _pattern("reversal", "READY", "95")
+        reversal.update(
+            isin="INE000000002", pattern_group="REVERSAL", pattern_class="REVERSAL"
+        )
+        self.repository.patterns.append(reversal)
+
+        setups = self.service.setups({"pageSize": ["10"]})
+        scanner = self.service.pattern_scanner({"pageSize": ["10"]})
+
+        self.assertNotIn("reversal", [item["patternInstanceId"] for item in setups["items"]])
+        self.assertIn("reversal", [item["patternInstanceId"] for item in scanner["items"]])
+
     def test_best_fit_ranks_each_active_lifecycle_state_with_explanations(self):
         payload = browser_payload(self.service.setups({"pageSize": ["10"]}))
 
@@ -91,6 +104,9 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertEqual(2, next(item["count"] for item in types if item["value"] == "BASE-VCP"))
         self.assertIn("COMP-IB", [item["value"] for item in types])
         self.assertIn("BRK-MULTIY", [item["value"] for item in types])
+
+        scanner_types = self.service.pattern_scanner({"pageSize": ["10"]})["facets"]["patternTypes"]
+        self.assertEqual(list(SUPPORTED_PATTERN_TYPES), [item["value"] for item in scanner_types])
 
     def test_global_search_resolves_company_name_to_security_isin(self):
         self.repository.securities["INE000000099"] = {
@@ -143,6 +159,7 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertEqual(Decimal("100"), chart["levels"]["pivot"])
         self.assertEqual(date(2026, 8, 20), chart["markerDate"])
         self.assertEqual(2, len(chart["evidence"]))
+        self.assertEqual(Decimal("12"), chart["evidence"][0]["measurements"]["depth_pct"])
         self.assertEqual("SPLIT", chart["corporateActions"][0]["actionType"])
         self.assertEqual("3m", chart["range"])
         with self.assertRaisesRegex(ValueError, "range must be"):
@@ -214,7 +231,13 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
 
         statement = repository.statements[-1]
         self.assertIn("WHERE trading_date = COALESCE", statement)
-        self.assertNotIn("WHERE trading_date <= (SELECT value FROM selected_date)", statement)
+        self.assertIn("p.terminal_date IS NULL", statement)
+        self.assertIn("p.pattern_group = 'SETUP'", statement)
+        self.assertIn("p.timeframe = '1D'", statement)
+        self.assertIn("COUNT(DISTINCT p.isin)", statement)
+        self.assertIn("FROM index_daily_bars", statement)
+        self.assertIn("f.distance_to_52_week_high_pct >= 0", statement)
+        self.assertNotIn("AVG(p.context_score)", statement)
 
     def test_active_setup_ranking_happens_before_feature_lookups(self):
         repository = CapturingPatternQueryRepository()

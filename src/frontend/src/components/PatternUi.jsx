@@ -1,5 +1,5 @@
 import React from 'react'
-import { formatMarketDate, formatPercent, formatPrice, formatScore, labelize } from '../utils/formatters.js'
+import { formatMarketDate, formatMeasurementValue, formatPercent, formatPrice, formatScore, labelize } from '../utils/formatters.js'
 import NavigationLink from './NavigationLink.jsx'
 import { buildPatternPath } from '../routing/routes.js'
 import LifecycleBadge from './LifecycleBadge.jsx'
@@ -34,7 +34,7 @@ export function ResourceState({ status, error, onRetry, children }) {
 export function MeasurementGrid({ values }) {
   const entries = Object.entries(values || {}).filter(([, value]) => value != null && typeof value !== 'object')
   if (!entries.length) return <p className="muted-copy">No measurements available for this section.</p>
-  return <dl className="measurement-grid">{entries.map(([key, value]) => <div key={key}><dt>{labelize(key)}</dt><dd>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}</dd></div>)}</dl>
+  return <dl className="measurement-grid">{entries.map(([key, value]) => <div key={key}><dt>{labelize(key)}</dt><dd>{formatMeasurementValue(value)}</dd></div>)}</dl>
 }
 
 export function PageIntro({ eyebrow, title, description, date }) {

@@ -4,8 +4,9 @@ import useApiResource from '../useApiResource.js'
 import { EmptyState, ResourceState } from './ResourceStates.jsx'
 import NavigationLink from './NavigationLink.jsx'
 import { buildSecurityPath } from '../routing/routes.js'
+import { formatNumber } from '../utils/formatters.js'
 
-const number = (value) => value == null ? 'Unavailable' : `${Number(value).toFixed(2)} pp`
+const number = (value) => value == null ? 'Unavailable' : `${formatNumber(value)} pp`
 const labels = { LEADING: 'Leading', WEAKENING: 'Weakening', LAGGING: 'Lagging', IMPROVING: 'Improving', UNAVAILABLE: 'Insufficient history' }
 
 function SectorStocks({ sector, asOf, onUnauthorized, onNavigate }) {

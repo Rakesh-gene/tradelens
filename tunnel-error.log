@@ -1,0 +1,77 @@
+{"level":"warn","message":"Your version 2025.11.1 is outdated. We recommend upgrading it to 2026.9.1","time":"2026-09-12T14:50:18Z"}
+2026-09-12T14:50:21Z WRN Your version 2025.11.1 is outdated. We recommend upgrading it to 2026.9.1
+2026-09-12T14:50:21Z INF Starting tunnel tunnelID=594e706d-32ed-4f29-8ef8-a6a9bb147c89
+2026-09-12T14:50:21Z INF Version 2025.11.1 (Checksum 413f9b24dc6e61a455564651524f167b8ce29ac4ccd40703dea7af93cd37ed39)
+2026-09-12T14:50:21Z INF GOOS: windows, GOVersion: go1.24.9, GoArch: amd64
+2026-09-12T14:50:21Z INF Settings: map[cred-file:C:\Users\bny17\.cloudflared\1b36fab5-5bd6-4d18-9b90-02dea01a9a94.json credentials-file:C:\Users\bny17\.cloudflared\1b36fab5-5bd6-4d18-9b90-02dea01a9a94.json token:*****]
+2026-09-12T14:50:21Z INF cloudflared will not automatically update on Windows systems.
+2026-09-12T14:50:21Z INF Generated Connector ID: 2724cd3b-a5e7-4dd6-b188-364fdc82e7e4
+2026-09-12T14:50:21Z INF Initial protocol quic
+2026-09-12T14:50:21Z INF ICMP proxy will use 192.168.29.132 as source for IPv4
+2026-09-12T14:50:21Z INF ICMP proxy will use 2405:201:d03d:9066:bcb2:4ebf:b88c:2400 in zone Wi-Fi 2 as source for IPv6
+2026-09-12T14:50:21Z INF cloudflared does not support loading the system root certificate pool on Windows. Please use --origin-ca-pool <PATH> to specify the path to the certificate pool
+2026-09-12T14:50:21Z INF cloudflared does not support loading the system root certificate pool on Windows. Please use --origin-ca-pool <PATH> to specify the path to the certificate pool
+2026-09-12T14:50:21Z INF ICMP proxy will use 192.168.29.132 as source for IPv4
+2026-09-12T14:50:21Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T14:50:21Z INF ICMP proxy will use 2405:201:d03d:9066:bcb2:4ebf:b88c:2400 in zone Wi-Fi 2 as source for IPv6
+2026-09-12T14:50:21Z INF Starting metrics server on 127.0.0.1:20242/metrics
+2026-09-12T14:50:22Z INF Registered tunnel connection connIndex=0 connection=8090fe0b-7bcc-4b1a-acac-95348101a68b event=0 ip=198.41.192.67 location=blr01 protocol=quic
+2026-09-12T14:50:22Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T14:50:22Z INF cloudflared does not support loading the system root certificate pool on Windows. Please use --origin-ca-pool <PATH> to specify the path to the certificate pool
+2026-09-12T14:50:22Z INF Updated to new configuration config="{\"ingress\":[{\"hostname\":\"tradelens.othla.in\", \"service\":\"http://localhost:5004\"}, {\"service\":\"http_status:404\"}], \"warp-routing\":{\"enabled\":false}}" version=2
+2026-09-12T14:50:23Z INF Registered tunnel connection connIndex=1 connection=f868ef53-c870-451e-87ef-33175e151254 event=0 ip=198.41.200.43 location=bom12 protocol=quic
+2026-09-12T14:50:23Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T14:50:23Z INF Registered tunnel connection connIndex=2 connection=b6066378-dcff-47c0-b831-c6a96499d04b event=0 ip=198.41.200.193 location=bom10 protocol=quic
+2026-09-12T14:50:24Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T14:50:24Z INF Registered tunnel connection connIndex=3 connection=4c24b5b6-fb64-4747-96ff-a882bb8a80a9 event=0 ip=198.41.192.7 location=blr01 protocol=quic
+2026-09-12T14:51:52Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 event=1 ingressRule=0 originService=http://localhost:5004
+2026-09-12T14:51:52Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 dest=https://tradelens.othla.in/ event=0 ip=198.41.192.7 type=ws
+2026/09/12 20:46:20 Unsolicited response received on idle HTTP channel starting with "HTTP/1.1 400 Bad Request\r\n\r\n"; err=<nil>
+2026/09/12 20:47:50 Unsolicited response received on idle HTTP channel starting with "HTTP/1.1 400 Bad Request\r\n\r\n"; err=<nil>
+2026-09-12T15:24:03Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 event=1 ingressRule=0 originService=http://localhost:5004
+2026-09-12T15:24:03Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 dest=https://tradelens.othla.in/ event=0 ip=198.41.192.7 type=ws
+2026-09-12T15:34:01Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 event=1 ingressRule=0 originService=http://localhost:5004
+2026-09-12T15:34:01Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 dest=https://tradelens.othla.in/ event=0 ip=198.41.192.7 type=ws
+2026-09-12T16:12:18Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 event=1 ingressRule=0 originService=http://localhost:5004
+2026-09-12T16:12:18Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 dest=https://tradelens.othla.in/api/admin/pipeline/runs/de6d5aa5-45c0-49bd-931c-6af9230c0074?itemPage=1&itemPageSize=25 event=0 ip=198.41.192.7 type=http
+2026-09-12T16:30:59Z ERR  error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 event=1 ingressRule=0 originService=http://localhost:5004
+2026-09-12T16:30:59Z ERR Request failed error="Unable to reach the origin service. The service may be down or it may not be responding to traffic from cloudflared: dial tcp [::1]:5004: connectex: No connection could be made because the target machine actively refused it." connIndex=3 dest=https://tradelens.othla.in/ event=0 ip=198.41.192.7 type=ws
+2026-09-12T19:11:35Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:35Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:35Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:35Z WRN Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:35Z INF Retrying connection in up to 1s connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:37Z WRN Connection terminated error="accept stream listener encountered a failure while serving" connIndex=3
+2026-09-12T19:11:47Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T19:11:48Z INF Registered tunnel connection connIndex=3 connection=d3ee15ba-8dca-4b82-90cd-647cafbc6fe1 event=0 ip=198.41.192.7 location=blr01 protocol=quic
+2026-09-12T21:28:08Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:08Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:08Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:08Z WRN Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:08Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:08Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:08Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:08Z WRN failed to serve tunnel connection error="datagram manager encountered a failure while serving" connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:08Z WRN Serve tunnel error error="datagram manager encountered a failure while serving" connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:08Z INF Retrying connection in up to 1s connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:08Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:08Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:08Z WRN failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:08Z WRN Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:08Z INF Retrying connection in up to 1s connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:09Z ERR failed to accept incoming stream requests error="failed to accept QUIC stream: timeout: no recent network activity" connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:09Z ERR failed to run the datagram handler error="timeout: no recent network activity" connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:09Z ERR failed to serve tunnel connection error="accept stream listener encountered a failure while serving" connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:09Z ERR Serve tunnel error error="accept stream listener encountered a failure while serving" connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:09Z INF Retrying connection in up to 1s connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:09Z ERR Connection terminated error="datagram manager encountered a failure while serving" connIndex=1
+2026-09-12T21:28:09Z ERR Connection terminated error="accept stream listener encountered a failure while serving" connIndex=3
+2026-09-12T21:28:09Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=0 event=0 ip=198.41.192.67
+2026-09-12T21:28:09Z INF Registered tunnel connection connIndex=0 connection=11333e05-5f0b-4342-9d13-4750772ea481 event=0 ip=198.41.192.67 location=blr01 protocol=quic
+2026-09-12T21:28:10Z WRN Connection terminated error="accept stream listener encountered a failure while serving" connIndex=2
+2026-09-12T21:28:21Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=1 event=0 ip=198.41.200.43
+2026-09-12T21:28:21Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=2 event=0 ip=198.41.200.193
+2026-09-12T21:28:21Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveP256] connIndex=3 event=0 ip=198.41.192.7
+2026-09-12T21:28:21Z INF Registered tunnel connection connIndex=3 connection=4dce174e-9eca-456c-bfec-295600977823 event=0 ip=198.41.192.7 location=blr01 protocol=quic
+2026-09-12T21:28:21Z INF Registered tunnel connection connIndex=2 connection=b59a2ce1-f33f-4db0-8ad3-3a5ec8cecb64 event=0 ip=198.41.200.193 location=bom10 protocol=quic
+2026-09-12T21:28:21Z INF Registered tunnel connection connIndex=1 connection=f2a4f77c-897a-41e7-be52-1d0c27f4b8d9 event=0 ip=198.41.200.43 location=bom12 protocol=quic

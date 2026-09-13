@@ -110,8 +110,8 @@ class ConcurrentHistoryService(HistoryService):
 
 class RecoveryService:
     def __init__(self): self.calls = []; self.failed = set()
-    def rebuild_security(self, isin, from_date, to_date, versions, dry_run=False):
-        self.calls.append((isin, from_date, to_date, versions))
+    def rebuild_security(self, isin, from_date, to_date, versions, dry_run=False, timeframes=('1D',)):
+        self.calls.append((isin, from_date, to_date, versions, tuple(timeframes)))
         if isin in self.failed:
             return {
                 "runId": f"pattern-{isin}", "status": "FAILED", "metrics": {},
@@ -200,6 +200,19 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
         self.assertEqual(1, result["run"]["securitiesCompleted"])
         self.assertEqual(1, result["run"]["securitiesFailed"])
         self.assertEqual(["COMPLETED", "FAILED"], [item["status"] for item in result["run"]["items"]])
+
+    def test_pattern_discovery_is_a_separate_activity_and_skips_history_download(self):
+        service = self._service()
+
+        result = service.start_pattern_scan({
+            "isins": ["INE002A01018"],
+            "timeframes": ["1D", "1W", "1M"],
+        }, "admin-1")
+
+        self.assertEqual("PATTERN_DISCOVERY", result["run"]["runKind"])
+        self.assertEqual(["1D", "1W", "1M"], result["run"]["requestedTimeframes"])
+        self.assertEqual([], self.history.requests)
+        self.assertEqual(("1D", "1W", "1M"), self.recovery.calls[0][4])
 
     def test_pattern_failure_preserves_run_id_and_exposes_root_cause(self):
         service = self._service()

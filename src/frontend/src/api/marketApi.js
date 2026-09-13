@@ -15,3 +15,7 @@ export function getOverview(query, options = {}) {
 export function getSetups(query, options = {}) {
   return authenticatedRequest('/api/setups', { ...options, query })
 }
+
+export function getPatterns(query, options = {}) {
+  return authenticatedRequest('/api/patterns', { ...options, query })
+}

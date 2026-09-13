@@ -57,6 +57,17 @@ class DailyPipelineSchedulerTestCase(unittest.TestCase):
         self.assertEqual("ALREADY_SCHEDULED", scheduler.tick())
         self.assertEqual(1, len(service.calls))
 
+    def test_skips_an_nse_market_holiday(self):
+        service = RecordingPipelineService()
+        scheduler = DailyPipelineScheduler(
+            service, now=lambda: datetime(2026, 1, 26, 20, 0, tzinfo=INDIA_STANDARD_TIME),
+            is_trading_day=lambda market_date: False,
+        )
+
+        self.assertEqual("MARKET_HOLIDAY", scheduler.tick())
+        self.assertEqual("ALREADY_SCHEDULED", scheduler.tick())
+        self.assertEqual([], service.calls)
+
     def test_parses_only_hour_and_minute(self):
         self.assertEqual(time(19, 0), parse_schedule_time("19:00"))
         for invalid in ("7 PM", "19:00:30", ""):

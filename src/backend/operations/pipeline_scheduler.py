@@ -32,6 +32,7 @@ class DailyPipelineScheduler:
         batch_size: int = 25,
         poll_seconds: float = 60,
         now: Callable[[], datetime] | None = None,
+        is_trading_day: Callable[[object], bool] | None = None,
         error_handler: Callable[[Exception], None] | None = None,
     ) -> None:
         if not 1 <= batch_size <= 100:
@@ -43,6 +44,7 @@ class DailyPipelineScheduler:
         self._batch_size = batch_size
         self._poll_seconds = poll_seconds
         self._now = now or (lambda: datetime.now(INDIA_STANDARD_TIME))
+        self._is_trading_day = is_trading_day or (lambda market_date: market_date.weekday() < 5)
         self._error_handler = error_handler or (lambda error: print(
             f"Pipeline scheduler error: {error}", flush=True
         ))
@@ -72,6 +74,9 @@ class DailyPipelineScheduler:
             return "NOT_DUE"
         if self._satisfied_date == current_date:
             return "ALREADY_SCHEDULED"
+        if not self._is_trading_day(current_date):
+            self._satisfied_date = current_date
+            return "MARKET_HOLIDAY"
         outcome = self._pipeline_service.ensure_scheduled_run(
             current_date, batch_size=self._batch_size
         )

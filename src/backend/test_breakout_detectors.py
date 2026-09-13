@@ -84,6 +84,33 @@ class BreakoutDetectorTestCase(unittest.TestCase):
             self.assertEqual(candidate.measurements["resistance_lookback_sessions"], lookback)
             self.assertEqual(candidate.pivot_price, _D("106"))
 
+    def test_52_week_high_does_not_reuse_an_unrelated_old_close(self):
+        bars, features, _ = _snapshot(300)
+        for row in bars:
+            row.update(high_price=_D("100"), low_price=_D("90"), close_price=_D("95"))
+        bars[5].update(high_price=_D("120"), close_price=_D("110"))
+        bars[-1].update(high_price=_D("96"), close_price=_D("95"))
+
+        candidates = self._detect(bars, features)
+
+        self.assertNotIn("BRK-52WH", {candidate.pattern_type for candidate in candidates})
+
+    def test_52_week_high_keeps_recent_trigger_pivot_for_confirmation(self):
+        bars, features, _ = _snapshot(254)
+        for row in bars:
+            row.update(high_price=_D("100"), low_price=_D("94"), close_price=_D("95"))
+        bars[-2].update(high_price=_D("102"), close_price=_D("101"))
+        bars[-1].update(high_price=_D("103"), close_price=_D("101"))
+
+        candidate = next(
+            item for item in self._detect(bars, features)
+            if item.pattern_type == "BRK-52WH"
+        )
+
+        self.assertEqual(PatternState.CONFIRMED, candidate.state)
+        self.assertEqual(_D("100"), candidate.pivot_price)
+        self.assertEqual(bars[-2]["trading_date"], candidate.measurements["breakout_date"])
+
     def test_range_source_requires_confirmed_tested_zone_in_20_to_120_session_window(self):
         bars, features, zone = _snapshot()
         bars[-1].update(close_price=_D("101"), high_price=_D("102"))
@@ -107,6 +134,14 @@ class BreakoutDetectorTestCase(unittest.TestCase):
 
         self.assertEqual(PatternState.TRIGGERED, candidate.state)
         self.assertEqual(bars[-1]["trading_date"], candidate.measurements["breakout_date"])
+
+    def test_range_breakout_does_not_reuse_a_trigger_outside_failure_window(self):
+        bars, features, zone = _snapshot(30)
+        bars[-10].update(close_price=_D("101"), high_price=_D("102"))
+
+        candidates = self._detect(bars, features, (zone,))
+
+        self.assertNotIn("BRK-RANGE", {candidate.pattern_type for candidate in candidates})
 
     def test_breakout_quality_stays_anchored_to_trigger_and_source_base_is_linked(self):
         bars, features, zone = _snapshot()

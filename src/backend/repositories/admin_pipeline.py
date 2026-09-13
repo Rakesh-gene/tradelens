@@ -91,16 +91,21 @@ class PostgresAdminPipelineRepository:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    """INSERT INTO admin_pipeline_runs (
+                    '''INSERT INTO admin_pipeline_runs (
                        id, requested_by, requested_from_date, requested_to_date,
-                           versions, force_refresh, run_scope, batch_size, status,
-                           securities_total, trigger_source, scheduled_for
-                       ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)""",
-                    (run_id, values["requested_by"], values["requested_from_date"],
-                     values["requested_to_date"], json.dumps(serialize_value(values["versions"]), sort_keys=True),
-                     values["force_refresh"], values.get("run_scope", "SELECTION"),
-                     values.get("batch_size", 25), values["status"], len(securities),
-                     values.get("trigger_source", "MANUAL"), values.get("scheduled_for")),
+                       versions, force_refresh, run_scope, batch_size, status,
+                       securities_total, trigger_source, scheduled_for, run_kind,
+                       requested_timeframes, pattern_groups
+                       ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s,
+                                 %s, %s, %s, %s::jsonb, %s::jsonb)''',
+                    (run_id, values['requested_by'], values['requested_from_date'],
+                     values['requested_to_date'], json.dumps(serialize_value(values['versions']), sort_keys=True),
+                     values['force_refresh'], values.get('run_scope', 'SELECTION'),
+                     values.get('batch_size', 25), values['status'], len(securities),
+                     values.get('trigger_source', 'MANUAL'), values.get('scheduled_for'),
+                     values.get('run_kind', 'FULL_PIPELINE'),
+                     json.dumps(list(values.get('requested_timeframes') or ('1D',))),
+                     json.dumps(list(values.get('pattern_groups') or ()))),
                 )
                 cursor.executemany(
                     """INSERT INTO admin_pipeline_run_items

@@ -1640,3 +1640,24 @@ has detector, boundary, lifecycle, serialization, and explanation tests.
 
 - `DETECTED`, `FORMING`, `MATURE`, `READY`, `TRIGGERED`, `CONFIRMED`,
   `FAILED`, `INVALIDATED`, and `EXPIRED`.
+
+# 24. Multi-timeframe scanner delivery
+
+Pattern discovery is a separate administrator activity from history download.
+It records the requested intervals and pattern groups on the parent run, then
+rebuilds derived adjusted data and invokes the shared runner without requesting
+new NSE history. Resume preserves the original interval selection.
+
+Completed work:
+
+- scanner API and UI filters for 1D, 1W, and 1M;
+- persisted timeframe, family, direction, and interval-completion metadata;
+- completed-week and completed-month aggregation from adjusted daily bars;
+- point-in-time REV-DBOT and REV-DTOP detectors and fixtures;
+- measured HARM-ABCD detection and fixtures;
+- administrator-only POST /api/admin/pattern-scans activity.
+
+Each later family must add configuration, pure detectors, golden fixtures,
+runner integration, lifecycle evidence, and scanner labels in one coherent
+change. Harmonic ratios remain measurements with configured tolerances; the
+client must never infer them from chart pixels.

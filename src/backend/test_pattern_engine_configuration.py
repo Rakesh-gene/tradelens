@@ -22,7 +22,8 @@ from pattern_engine.models import PatternCandidate
 class PatternEngineEnumTestCase(unittest.TestCase):
     def test_enums_serialize_to_canonical_identifiers(self) -> None:
         self.assertEqual([item.value for item in PatternClass], [
-            "TREND", "BASE", "BREAKOUT", "PULLBACK", "COMPRESSION", "MOMENTUM", "FAILURE"
+            "TREND", "BASE", "BREAKOUT", "PULLBACK", "COMPRESSION", "MOMENTUM", "FAILURE",
+            "REVERSAL", "CONTINUATION", "HARMONIC", "CANDLESTICK"
         ])
         self.assertEqual([item.value for item in PatternState], [
             "DETECTED", "FORMING", "MATURE", "READY", "TRIGGERED", "CONFIRMED", "FAILED",
@@ -47,7 +48,7 @@ class PatternEngineConfigurationTestCase(unittest.TestCase):
     def test_default_configuration_loads_with_immutable_sections(self) -> None:
         configuration = load_pattern_engine_configuration()
 
-        self.assertEqual(configuration.version, "v1")
+        self.assertEqual(configuration.version, "v2")
         self.assertEqual(configuration.section("setup_weights")["pattern_quality"], 35.0)
         self.assertEqual(configuration.section("adjustments")["cash_dividend_policy"], "ignore")
         self.assertEqual(configuration.section("operations")["daily_processing_window_minutes"], 120)

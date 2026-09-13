@@ -66,29 +66,31 @@ def _sources(isin, bars, zones, source_bases, context, config):
                 available_date=zone.confirmation_date or zone.end_date,
                 source_base=base,
             ))
-    if len(bars) >= 253:
-        prior = bars[-253:-1]
-        pivot = max(_decimal(row["high_price"]) for row in prior)
+    recent_52wh = _recent_prior_high(bars, 252, settings)
+    if recent_52wh is not None:
+        trigger_index, prior, pivot = recent_52wh
         sources.append(_PivotSource(
             "BRK-52WH", None, pivot, _date(prior[0]), _near_tests(prior, pivot, _D("0")),
             _D("80"), {"prior_52_week_high": pivot},
+            available_date=_date(bars[trigger_index]),
             source_base=_matching_base(isin, pivot, source_bases, context.as_of_date),
         ))
     min_ath = int(settings["ath_minimum_history_sessions"])
-    if len(bars) >= min_ath + 1:
-        prior = bars[:-1]
-        pivot = max(_decimal(row["high_price"]) for row in prior)
+    recent_ath = _recent_prior_high(bars, None, settings, minimum_history=min_ath)
+    if recent_ath is not None:
+        trigger_index, prior, pivot = recent_ath
         sources.append(_PivotSource(
             "BRK-ATH", None, pivot, _date(prior[0]), _near_tests(prior, pivot, _D("0")),
             _D("80"), {"all_time_high": pivot, "history_sessions": len(prior)},
+            available_date=_date(bars[trigger_index]),
             source_base=_matching_base(isin, pivot, source_bases, context.as_of_date),
         ))
     tolerance = _decimal(settings["multi_year_tolerance_pct"])
     for sessions, variant in ((504, "BRK-2Y"), (756, "BRK-3Y"), (1260, "BRK-5Y")):
-        if len(bars) < sessions + 1:
+        recent_multi_year = _recent_prior_high(bars, sessions, settings)
+        if recent_multi_year is None:
             continue
-        prior = bars[-sessions - 1:-1]
-        pivot = max(_decimal(row["high_price"]) for row in prior)
+        trigger_index, prior, pivot = recent_multi_year
         tests = _near_tests(prior, pivot, tolerance)
         sources.append(_PivotSource(
             "BRK-MULTIY", variant, pivot, _date(prior[0]), tests,
@@ -98,9 +100,42 @@ def _sources(isin, bars, zones, source_bases, context, config):
                 "resistance_age_sessions": _resistance_age(prior, pivot, tolerance),
                 "historical_test_count": tests,
             },
+            available_date=_date(bars[trigger_index]),
             source_base=_matching_base(isin, pivot, source_bases, context.as_of_date),
         ))
     return sources
+
+
+def _recent_prior_high(bars, lookback_sessions, settings, *, minimum_history=None):
+    """Return a recent breakout and the resistance known on its trigger date.
+
+    A rolling-high pivot belongs to each possible trigger session.  Calculating
+    today's pivot and searching all older bars can pair that pivot with an
+    unrelated historical close, leaving a years-old signal active today.
+    Search only the breakout failure/confirmation window and calculate each
+    candidate session's pivot from data strictly before that session.
+    """
+
+    required = minimum_history if minimum_history is not None else lookback_sessions
+    if required is None or len(bars) < required + 1:
+        return None
+    observation_sessions = int(settings["failure_window_sessions"]) + 1
+    first_index = max(required, len(bars) - observation_sessions)
+    buffer_pct = _decimal(settings["breakout_buffer_pct"])
+    minimum_pct = _decimal(settings["minimum_close_above_pivot_pct"])
+    for trigger_index in range(first_index, len(bars)):
+        prior = (
+            bars[:trigger_index]
+            if lookback_sessions is None
+            else bars[trigger_index - lookback_sessions:trigger_index]
+        )
+        if len(prior) < required:
+            continue
+        pivot = max(_decimal(row["high_price"]) for row in prior)
+        threshold = pivot + max(pivot * buffer_pct / 100, pivot * minimum_pct / 100)
+        if _decimal(bars[trigger_index]["close_price"]) > threshold:
+            return trigger_index, prior, pivot
+    return None
 
 
 def _breakout_core(isin, bars, feature_by_date, context, config, source):
@@ -117,6 +152,10 @@ def _breakout_core(isin, bars, feature_by_date, context, config, source):
     available_index = next(
         (index for index, row in enumerate(bars) if source.available_date is None or _date(row) >= source.available_date),
         len(bars),
+    )
+    available_index = max(
+        available_index,
+        len(bars) - int(settings["failure_window_sessions"]) - 1,
     )
     trigger_index = _trigger_index(bars, source.pivot, threshold, available_index)
     if trigger_index is None:

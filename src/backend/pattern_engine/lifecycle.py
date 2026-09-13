@@ -137,6 +137,46 @@ class PatternLifecycleService:
             ))
         return results
 
+    def invalidate_lineage_mismatches(
+        self,
+        isin: str,
+        as_of_date: date,
+        *,
+        engine_version: str,
+        feature_version: str,
+        adjustment_version: str,
+    ) -> list[LifecycleResult]:
+        """Close active instances calculated from superseded engine inputs."""
+
+        expected = (
+            ("adjustment_version", adjustment_version, "ADJUSTMENT_VERSION_CHANGED"),
+            ("engine_version", engine_version, "ENGINE_VERSION_CHANGED"),
+            ("configuration_version", self._configuration.version, "CONFIGURATION_VERSION_CHANGED"),
+            ("feature_version", feature_version, "FEATURE_VERSION_CHANGED"),
+        )
+        results = []
+        for instance in self._repository.load_active_patterns(isin):
+            mismatch = next(
+                (
+                    (field, replacement, reason)
+                    for field, replacement, reason in expected
+                    if str(_field(instance, field) or "") != replacement
+                ),
+                None,
+            )
+            if mismatch is None:
+                continue
+            field, replacement, reason = mismatch
+            results.append(self._terminalize(
+                instance,
+                PatternState.INVALIDATED,
+                as_of_date,
+                reason,
+                replacement_field=f"replacement_{field}",
+                replacement_value=replacement,
+            ))
+        return results
+
     def invalidate_active(
         self, isin: str, as_of_date: date, reason: str
     ) -> list[LifecycleResult]:
@@ -168,17 +208,86 @@ class PatternLifecycleService:
             ))
         return results
 
-    def expire_stale(self, isin: str, as_of_date: date, trading_dates: Sequence[date]) -> list[LifecycleResult]:
+    def reconcile_unobserved(
+        self,
+        isin: str,
+        as_of_date: date,
+        observed_pattern_ids: Sequence[str],
+        scanned_timeframes: Sequence[str],
+    ) -> list[LifecycleResult]:
+        """Terminalize active structures absent from a completed detector pass.
+
+        Confirmed and recently triggered breakouts have their own retention
+        windows and are handled by ``expire_stale``. Other families must be
+        observed again in the current scan to remain active.
+        """
+
+        observed = frozenset(str(value) for value in observed_pattern_ids)
+        timeframes = frozenset(str(value) for value in scanned_timeframes)
+        transient_classes = {
+            PatternClass.TREND.value,
+            PatternClass.COMPRESSION.value,
+            PatternClass.MOMENTUM.value,
+            PatternClass.FAILURE.value,
+        }
+        results = []
+        for instance in self._repository.load_active_patterns(isin):
+            instance_id = str(_field(instance, "id") or _field(instance, "pattern_instance_id") or "")
+            if instance_id in observed:
+                continue
+            pattern_class = str(_field(instance, "pattern_class") or "")
+            timeframe = str(_field(instance, "timeframe") or "1D")
+            scanned = (
+                timeframe in timeframes
+                if pattern_class in {PatternClass.REVERSAL.value, PatternClass.HARMONIC.value}
+                else timeframe == "1D"
+            )
+            if not scanned or pattern_class == PatternClass.BREAKOUT.value:
+                continue
+            terminal_state = (
+                PatternState.EXPIRED
+                if pattern_class in transient_classes
+                else PatternState.INVALIDATED
+            )
+            reason = (
+                "NOT_OBSERVED_IN_COMPLETED_SCAN"
+                if terminal_state is PatternState.INVALIDATED
+                else "CONDITION_NOT_PRESENT_IN_COMPLETED_SCAN"
+            )
+            results.append(self._terminalize(instance, terminal_state, as_of_date, reason))
+        return results
+
+    def expire_stale(
+        self,
+        isin: str,
+        as_of_date: date,
+        trading_dates: Sequence[date],
+        *,
+        observed_pattern_ids: Sequence[str] | None = None,
+    ) -> list[LifecycleResult]:
         ordered_dates = sorted(day for day in trading_dates if day <= as_of_date)
         index = {day: position for position, day in enumerate(ordered_dates)}
         if as_of_date not in index:
             return []
+        observed = (
+            None
+            if observed_pattern_ids is None
+            else frozenset(str(value) for value in observed_pattern_ids)
+        )
         results = []
         for instance in self._repository.load_active_patterns(isin):
-            if _as_date(_field(instance, "last_updated_date")) >= as_of_date:
+            instance_id = str(_field(instance, "id") or _field(instance, "pattern_instance_id") or "")
+            if observed is not None and instance_id in observed:
+                continue
+            if observed is None and _as_date(_field(instance, "last_updated_date")) >= as_of_date:
                 continue
             maximum = self._maximum_duration(instance)
-            start = _as_date(_field(instance, "start_date"))
+            start_value = (
+                _field(instance, "trigger_date") or _field(instance, "start_date")
+                if str(_field(instance, "pattern_class")) == PatternClass.BREAKOUT.value
+                else _field(instance, "start_date")
+            )
+            start = _as_date(start_value)
             if maximum is None or start not in index or index[as_of_date] - index[start] <= maximum:
                 continue
             state = PatternState(str(_field(instance, "state")))
@@ -213,6 +322,8 @@ class PatternLifecycleService:
             )
         matches = []
         for instance in active:
+            if str(_field(instance, 'timeframe') or '1D') != candidate.timeframe:
+                continue
             state = PatternState(str(_field(instance, "state")))
             if state in _TERMINAL:
                 continue
@@ -257,6 +368,14 @@ class PatternLifecycleService:
             PatternClass.TREND: {PatternState.DETECTED},
             PatternClass.COMPRESSION: {PatternState.DETECTED},
             PatternClass.MOMENTUM: {PatternState.DETECTED},
+            PatternClass.REVERSAL: {
+                PatternState.DETECTED, PatternState.FORMING, PatternState.READY,
+                PatternState.TRIGGERED, PatternState.CONFIRMED, PatternState.INVALIDATED,
+            },
+            PatternClass.HARMONIC: {
+                PatternState.DETECTED, PatternState.FORMING, PatternState.READY,
+                PatternState.TRIGGERED, PatternState.CONFIRMED, PatternState.INVALIDATED,
+            },
         }
         states = allowed.get(candidate.pattern_class)
         if states is not None and candidate.state not in states:
@@ -288,6 +407,10 @@ class PatternLifecycleService:
             "pivot_price": candidate.pivot_price, "support_price": candidate.support_price,
             "invalidation_price": candidate.invalidation_price,
             "source_pattern_id": str(source_id) if source_id else None,
+            "timeframe": candidate.timeframe,
+            "pattern_group": candidate.pattern_group,
+            "direction": candidate.direction,
+            "interval_complete": candidate.interval_complete,
             "measurements": serialize_value(candidate.measurements),
             "supporting_patterns": serialize_value(candidate.supporting_pattern_identifiers),
             "configuration_version": self._configuration.version,
@@ -305,6 +428,10 @@ class PatternLifecycleService:
             "support_price": candidate.support_price, "invalidation_price": candidate.invalidation_price,
             "measurements": serialize_value(candidate.measurements),
             "supporting_patterns": serialize_value(candidate.supporting_pattern_identifiers),
+            "timeframe": candidate.timeframe,
+            "pattern_group": candidate.pattern_group,
+            "direction": candidate.direction,
+            "interval_complete": candidate.interval_complete,
             "terminal_date": candidate.detected_date if candidate.state in _TERMINAL else None,
         }
         if candidate.state in {PatternState.TRIGGERED, PatternState.CONFIRMED} and not _field(match, "trigger_date"):
@@ -340,12 +467,77 @@ class PatternLifecycleService:
             "new_values": new_values, "effective_date": effective_date,
         }
 
+    def _terminalize(
+        self,
+        instance,
+        terminal_state,
+        as_of_date,
+        reason,
+        *,
+        replacement_field=None,
+        replacement_value=None,
+    ):
+        previous_state = PatternState(str(_field(instance, "state")))
+        reason_field = (
+            "expiration_reason"
+            if terminal_state is PatternState.EXPIRED
+            else "invalidation_reason"
+        )
+        measurements = {**dict(_field(instance, "measurements") or {}), reason_field: reason}
+        if replacement_field is not None:
+            measurements[replacement_field] = replacement_value
+        values = {
+            **dict(instance),
+            "state": terminal_state.value,
+            "terminal_date": as_of_date,
+            "last_updated_date": as_of_date,
+            "measurements": measurements,
+        }
+        event_type = (
+            PatternEventType.EXPIRED
+            if terminal_state is PatternState.EXPIRED
+            else PatternEventType.INVALIDATED
+        )
+        new_event_values = {**self._event_values(values), reason_field: reason}
+        if replacement_field is not None:
+            new_event_values[replacement_field] = replacement_value
+        event = self._event(
+            event_type,
+            previous_state,
+            terminal_state,
+            int(_field(instance, "state_version") or 1) + 1,
+            self._event_values(instance),
+            new_event_values,
+            as_of_date,
+        )
+        updated = self._repository.update_pattern(
+            str(_field(instance, "id")),
+            int(_field(instance, "state_version") or 1),
+            values,
+            event,
+        )
+        return LifecycleResult(
+            "expired" if terminal_state is PatternState.EXPIRED else "invalidated",
+            updated,
+            event_type,
+        )
+
     def _event_values(self, values):
         keys = ("state", "variant", "pivot_price", "support_price", "invalidation_price", "quality_score", "maturity_score", "context_score", "setup_score", "terminal_date")
         return {key: serialize_value(_field(values, key)) for key in keys}
 
     def _maximum_duration(self, instance):
         pattern_type = str(_field(instance, "pattern_type"))
+        if (
+            str(_field(instance, "pattern_class")) == PatternClass.BREAKOUT.value
+            and str(_field(instance, "state")) == PatternState.TRIGGERED.value
+        ):
+            return int(self._configuration.section("breakout")["failure_window_sessions"])
+        if (
+            str(_field(instance, "pattern_class")) == PatternClass.BREAKOUT.value
+            and str(_field(instance, "state")) == PatternState.CONFIRMED.value
+        ):
+            return int(self._configuration.section("breakout_retest")["max_sessions_after_breakout"])
         if pattern_type == "PB-BRKRET":
             return int(self._configuration.section("breakout_retest")["max_sessions_after_breakout"])
         if pattern_type == "PB-EMA20":
@@ -358,6 +550,12 @@ class PatternLifecycleService:
             return int(self._configuration.section("flat_base")["max_duration_sessions"])
         if pattern_type == "BASE-52WH":
             return int(self._configuration.section("base_52wh")["max_duration_sessions"])
+        timeframe = str(_field(instance, 'timeframe') or '1D')
+        multiplier = {'1D': 1, '1W': 5, '1M': 21}.get(timeframe, 1)
+        if pattern_type.startswith('REV-'):
+            return int(self._configuration.section('reversal')['maximum_pattern_bars']) * multiplier
+        if pattern_type.startswith('HARM-'):
+            return int(self._configuration.section('harmonic')['maximum_pattern_bars']) * multiplier
         return None
 
 
@@ -366,7 +564,7 @@ def _deduplication_key(candidate):
         format(candidate.pivot_price.normalize(), "f")
         if isinstance(candidate.pivot_price, Decimal) else str(candidate.pivot_price)
     )
-    raw = f"{candidate.isin}|{candidate.pattern_type}|{candidate.start_date.isoformat()}|{pivot}"
+    raw = f"{candidate.isin}|{candidate.timeframe}|{candidate.pattern_type}|{candidate.start_date.isoformat()}|{pivot}"
     return sha256(raw.encode("utf-8")).hexdigest()
 
 

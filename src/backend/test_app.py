@@ -29,6 +29,9 @@ class FakeAdminPipelineService:
     def start(self, payload, requested_by):
         self.started.append((payload, requested_by))
         return {"run": {"runId": self.RUN_ID, "status": "PENDING", "items": []}}
+    def start_pattern_scan(self, payload, requested_by):
+        self.started.append(({**payload, "runKind": "PATTERN_DISCOVERY"}, requested_by))
+        return {"run": {"runId": self.RUN_ID, "status": "PENDING", "runKind": "PATTERN_DISCOVERY", "items": []}}
     def pause(self, run_id):
         self.controls.append(("pause", run_id))
         return {"run": {"runId": run_id, "status": "PAUSED", "items": []}}
@@ -244,6 +247,14 @@ class ApiTestCase(unittest.TestCase):
         with urlopen(start) as response:
             self.assertEqual(202, response.status)
             run_id = json.load(response)["run"]["runId"]
+        pattern_scan = Request(
+            f"{self.base_url}/api/admin/pattern-scans", method="POST",
+            data=json.dumps({"isins": ["INE002A01018"], "timeframes": ["1D", "1W", "1M"]}).encode(),
+            headers={**headers, "Content-Type": "application/json"},
+        )
+        with urlopen(pattern_scan) as response:
+            self.assertEqual(202, response.status)
+            self.assertEqual("PATTERN_DISCOVERY", json.load(response)["run"]["runKind"])
         with urlopen(Request(f"{self.base_url}/api/admin/pipeline/runs/{run_id}", headers=headers)) as response:
             self.assertEqual("RUNNING", json.load(response)["run"]["status"])
         control = Request(
@@ -270,6 +281,12 @@ class ApiTestCase(unittest.TestCase):
         request = Request(f"{self.base_url}/api/overview", headers={"Authorization": f"Bearer {token}"})
         with urlopen(request) as response:
             payload = json.load(response)
+        scanner = Request(
+            f"{self.base_url}/api/patterns?timeframe=1W&patternGroup=REVERSAL",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urlopen(scanner) as response:
+            self.assertEqual("1W", json.load(response)["timeframe"])
         self.assertIn("countsByState", payload)
         self.assertIn("topSetups", payload)
         request = Request(f"{self.base_url}/api/sectors/rotation", headers={"Authorization": f"Bearer {token}"})

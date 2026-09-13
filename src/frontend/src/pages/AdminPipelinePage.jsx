@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { controlPipelineRun, createPipelineRun, getAdminEquities, getPipelineRun, getPipelineRuns } from '../api/adminApi.js'
+import { controlPipelineRun, createPatternScan, createPipelineRun, getAdminEquities, getPipelineRun, getPipelineRuns } from '../api/adminApi.js'
 import useApiResource from '../useApiResource.js'
 import { PageIntro, ResourceState, StateBadge } from '../components/PatternUi.jsx'
 import { formatMarketDate } from '../utils/formatters.js'
 import useDocumentTitle from '../hooks/useDocumentTitle.js'
 
 const TERMINAL = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'PAUSED', 'TERMINATED', 'CANCELLED'])
+const TIMEFRAMES = ['1D', '1W', '1M']
 
 function isoDate(value) { return value.toISOString().slice(0, 10) }
 function defaultFromDate() { const value = new Date(); value.setFullYear(value.getFullYear() - 10); return isoDate(value) }
@@ -21,6 +22,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   const [toDate, setToDate] = useState(() => isoDate(new Date()))
   const [forceRefresh, setForceRefresh] = useState(false)
   const [batchSize, setBatchSize] = useState(25)
+  const [timeframes, setTimeframes] = useState(() => new Set(TIMEFRAMES))
   const [activeRun, setActiveRun] = useState(null)
   const [itemPage, setItemPage] = useState(1)
   const [actionError, setActionError] = useState('')
@@ -57,12 +59,15 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
     return next
   })
   const applySearch = (event) => { event.preventDefault(); setPage(1); setSearch(searchText.trim()) }
-  const startRun = async (runAll = false) => {
-    setSubmitting(runAll ? 'all' : 'selection'); setActionError('')
+  const startRun = async (runAll = false, patternOnly = false) => {
+    const action = patternOnly ? `patterns-${runAll ? 'all' : 'selection'}` : runAll ? 'all' : 'selection'
+    setSubmitting(action); setActionError('')
     try {
-      const payload = await createPipelineRun({
+      const createRun = patternOnly ? createPatternScan : createPipelineRun
+      const payload = await createRun({
         ...(runAll ? { allEquities: true } : { isins: [...selected] }),
         fromDate, toDate, forceRefresh, batchSize: Number(batchSize),
+        ...(patternOnly ? { timeframes: [...timeframes] } : {}),
       }, { onUnauthorized })
       setActiveRun(payload.run)
       setItemPage(1)
@@ -77,6 +82,12 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
     try { setActiveRun((await getPipelineRun(runId, { itemPage: 1, itemPageSize: 25 }, { onUnauthorized })).run) }
     catch (error) { setActionError(error.message) }
   }
+  const toggleTimeframe = (value) => setTimeframes((current) => {
+    const next = new Set(current)
+    if (next.has(value) && next.size > 1) next.delete(value)
+    else next.add(value)
+    return next
+  })
 
   const changeItemPage = async (nextPage) => {
     if (!activeRun) return
@@ -107,10 +118,13 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
       <label>Through<input type="date" value={toDate} min={fromDate} onChange={(event) => setToDate(event.target.value)} /></label>
       <label>Batch size<input type="number" min="1" max="100" value={batchSize} onChange={(event) => setBatchSize(event.target.value)} /></label>
       <label className="admin-force"><input type="checkbox" checked={forceRefresh} onChange={(event) => setForceRefresh(event.target.checked)} /><span><strong>Force source refresh</strong><small>Re-download existing ranges instead of filling gaps only.</small></span></label>
+      <fieldset className='admin-timeframes'><legend>Pattern discovery intervals</legend>{TIMEFRAMES.map((value) => <label key={value}><input type='checkbox' checked={timeframes.has(value)} onChange={() => toggleTimeframe(value)} /><span>{value === '1D' ? 'Daily' : value === '1W' ? 'Weekly' : 'Monthly'}</span></label>)}</fieldset>
       <p className="admin-incremental-note"><strong>Incremental by default.</strong> With Force source refresh off, stored history is retained and only missing sessions after each equity's latest bar are requested from NSE.</p>
       <div className="admin-run-actions">
         <button className="primary-button" type="button" disabled={!selected.size || submitting || running} onClick={() => startRun(false)}>{submitting === 'selection' ? 'Queuing…' : running ? 'Run in progress' : 'Run selected'}</button>
         <button className="secondary-button" type="button" disabled={!equities.data?.totalItems || submitting || running} onClick={() => startRun(true)}>{submitting === 'all' ? 'Queuing all…' : 'Run all equities'}</button>
+        <button className='secondary-button' type='button' disabled={!selected.size || submitting || running} onClick={() => startRun(false, true)}>{submitting === 'patterns-selection' ? 'Queuing…' : 'Patterns · selected'}</button>
+        <button className='secondary-button' type='button' disabled={!equities.data?.totalItems || submitting || running} onClick={() => startRun(true, true)}>{submitting === 'patterns-all' ? 'Queuing all…' : 'Patterns · all'}</button>
       </div>
     </section>
     {actionError && <p className="form-message error" role="alert">{actionError}</p>}
@@ -143,7 +157,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
       <aside className="admin-recent" aria-labelledby="recent-runs-title">
         <div className="section-heading"><div><p className="eyebrow">Audit trail</p><h2 id="recent-runs-title">Recent runs</h2></div></div>
         <ResourceState status={recent.status} error={recent.error} onRetry={recent.reload}>
-          <div className="admin-run-list">{(recent.data?.items || []).length ? recent.data.items.map((run) => <button type="button" key={run.runId} onClick={() => openRun(run.runId)}><span><strong>{run.status}</strong><small>{formatMarketDate(run.createdAt?.slice(0, 10))}</small></span><span>{run.securitiesCompleted}/{run.securitiesTotal}</span></button>) : <p className="muted-copy">No pipeline runs yet.</p>}</div>
+          <div className="admin-run-list">{(recent.data?.items || []).length ? recent.data.items.map((run) => <button type="button" key={run.runId} onClick={() => openRun(run.runId)}><span><strong>{run.status}</strong><small>{run.runKind === 'PATTERN_DISCOVERY' ? 'Pattern discovery' : 'Full pipeline'} · {formatMarketDate(run.createdAt?.slice(0, 10))}</small></span><span>{run.securitiesCompleted}/{run.securitiesTotal}</span></button>) : <p className="muted-copy">No pipeline runs yet.</p>}</div>
         </ResourceState>
       </aside>
     </div>

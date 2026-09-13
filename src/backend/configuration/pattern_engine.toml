@@ -1,5 +1,5 @@
 [engine]
-version = "v1"
+version = "v2"
 minimum_history_sessions = 250
 score_event_minimum_delta = 1.0
 
@@ -171,6 +171,21 @@ sma50_failure_close_below_pct = 2.0
 sma50_minimum_consecutive_closes = 2
 sma50_minimum_penetration_atr = 1.0
 structural_failure_lookback_sessions = 60
+
+[reversal]
+minimum_separation_bars = 3
+maximum_pattern_bars = 40
+maximum_peak_similarity_pct = 3.0
+minimum_neckline_depth_pct = 8.0
+breakout_buffer_pct = 0.5
+
+[harmonic]
+maximum_pattern_bars = 60
+abcd_leg_ratio_min = 0.85
+abcd_leg_ratio_max = 1.15
+abcd_retracement_min = 0.382
+abcd_retracement_max = 0.886
+breakout_buffer_pct = 0.5
 climax_volume_ratio = 2.0
 
 [quality_weights]

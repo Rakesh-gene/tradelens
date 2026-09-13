@@ -30,6 +30,7 @@ class PatternQueryRepository(Protocol):
     def get_security_identity(self, isin, as_of): ...
     def get_latest_feature(self, isin, as_of): ...
     def list_security_patterns(self, isin, as_of, limit=50): ...
+    def list_chart_patterns(self, isin, as_of, start_date, limit=500): ...
     def list_security_events(self, isin, as_of, limit=25): ...
 
 
@@ -117,15 +118,7 @@ class PatternQueryService:
         rows = self._repository.list_setups(filters, page_size, offset)
         has_more = len(rows) > page_size
         total_count = int(rows[0].get("total_count") or 0) if rows else 0
-        facets = self._repository.setup_facets(filters["as_of"])
-        observed_types = {
-            str(item.get("value")): int(item.get("count") or 0)
-            for item in facets.get("patternTypes", []) if item.get("value")
-        }
-        facets["patternTypes"] = [
-            {"value": pattern_type, "count": observed_types.get(pattern_type, 0)}
-            for pattern_type in SUPPORTED_PATTERN_TYPES
-        ]
+        facets = _complete_pattern_type_facets(self._repository.setup_facets(filters["as_of"]))
         return {
             "dataAsOf": filters["as_of"],
             "items": [_setup(row) for row in rows[:page_size]],
@@ -142,6 +135,24 @@ class PatternQueryService:
                 "historicalOutcomesIncluded": False,
                 "decisionMethodologyVersion": DECISION_VERSION,
             },
+        }
+
+    def pattern_scanner(self, query):
+        filters = self._setup_filters(query, default_pattern_group=None)
+        page_size = _integer(_one(query, 'pageSize'), 25, 10, 100, 'pageSize')
+        offset = _decode_cursor(_one(query, 'cursor'))
+        rows = self._repository.list_setups(filters, page_size, offset)
+        has_more = len(rows) > page_size
+        total_count = int(rows[0].get('total_count') or 0) if rows else 0
+        return {
+            'dataAsOf': filters['as_of'], 'generatedAt': datetime.now(timezone.utc),
+            'engineVersion': _latest_value(rows, 'engine_version'),
+            'configurationVersion': _latest_value(rows, 'configuration_version'),
+            'isStale': (date.today() - filters['as_of']).days > 3,
+            'timeframe': filters['timeframe'], 'items': [_setup(row) for row in rows[:page_size]],
+            'totalCount': total_count,
+            'nextCursor': _encode_cursor(offset + page_size) if has_more else None,
+            'facets': _complete_pattern_type_facets(self._repository.setup_facets(filters['as_of'])),
         }
 
     def pattern(self, pattern_id):
@@ -171,7 +182,9 @@ class PatternQueryService:
         window = _chart_window(_one(query, "range"))
         as_of = row.get("last_updated_date")
         start_date = as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
-        evidence = self._repository.list_security_patterns(row["isin"], row["last_updated_date"])
+        evidence = self._repository.list_chart_patterns(row["isin"], as_of, start_date)
+        if not any(str(item.get("id")) == str(row.get("id")) for item in evidence):
+            evidence = [row, *evidence]
         actions = self._repository.list_chart_actions(row["isin"], as_of, start_date)
         bars = [] if not adjustment_version else self._repository.list_chart_bars(
             row["isin"], adjustment_version, as_of, start_date,
@@ -203,7 +216,7 @@ class PatternQueryService:
             raise LookupError("Security not found")
         window = _chart_window(_one(query, "range"))
         start_date = as_of - timedelta(days=_CHART_WINDOW_DAYS[window])
-        evidence = self._repository.list_security_patterns(isin, as_of)
+        evidence = self._repository.list_chart_patterns(isin, as_of, start_date)
         actions = self._repository.list_chart_actions(isin, as_of, start_date)
         adjustment_version = self._repository.get_latest_adjustment_version(isin, as_of)
         bars = [] if not adjustment_version else self._repository.list_chart_bars(
@@ -302,7 +315,7 @@ class PatternQueryService:
             },
         }
 
-    def _setup_filters(self, query):
+    def _setup_filters(self, query, default_pattern_group="SETUP"):
         as_of = _optional_date(_one(query, "asOf")) or date.today()
         filters = _default_filters(as_of)
         pattern_class = _one(query, "patternClass")
@@ -322,6 +335,17 @@ class PatternQueryService:
         direction = _one(query, "direction") or "desc"
         if direction not in {"asc", "desc"}: raise ValueError("Invalid direction")
         filters.update({"sort": sort, "direction": direction})
+        timeframe = _one(query, 'timeframe') or '1D'
+        if timeframe not in {'1D', '1W', '1M'}:
+            raise ValueError('Invalid timeframe')
+        pattern_group = (_one(query, 'patternGroup') or '').strip() or default_pattern_group
+        if pattern_group and pattern_group not in {'SETUP', 'REVERSAL', 'CONTINUATION', 'HARMONIC'}:
+            raise ValueError('Invalid patternGroup')
+        pattern_direction = (_one(query, 'patternDirection') or '').strip() or None
+        if pattern_direction and pattern_direction not in {'BULLISH', 'BEARISH', 'NEUTRAL'}:
+            raise ValueError('Invalid patternDirection')
+        filters.update({'timeframe': timeframe, 'pattern_group': pattern_group,
+                        'pattern_direction': pattern_direction})
         return filters
 
 
@@ -331,7 +355,7 @@ _ACTIVE_OPPORTUNITY_STATES = (
 
 
 def _default_filters(as_of):
-    return {"as_of": as_of, "pattern_class": None, "pattern_type": None, "variant": None, "states": _ACTIVE_OPPORTUNITY_STATES, "sector": None, "min_setup_score": None, "max_setup_score": None, "min_rs6m": None, "min_liquidity_score": None, "sort": "bestFit", "direction": "desc"}
+    return {"as_of": as_of, "pattern_class": None, "pattern_type": None, "variant": None, "states": _ACTIVE_OPPORTUNITY_STATES, "sector": None, "min_setup_score": None, "max_setup_score": None, "min_rs6m": None, "min_liquidity_score": None, "sort": "bestFit", "direction": "desc", "timeframe": "1D", "pattern_group": "SETUP", "pattern_direction": None}
 
 
 _CHART_WINDOW_DAYS = {"3m": 92, "6m": 184, "1y": 365, "5y": 1826, "10y": 3653}
@@ -353,6 +377,12 @@ def _setup(row):
     result = {"patternInstanceId": row.get("id") or row.get("pattern_instance_id"), "security": _security(row), "patternClass": row.get("pattern_class"), "patternType": row.get("pattern_type"), "variant": row.get("variant"), "state": row.get("state"), "detectedDate": row.get("detected_date"), "lastUpdatedDate": row.get("last_updated_date"), "qualityScore": row.get("quality_score"), "maturityScore": row.get("maturity_score"), "maturityBand": scoring.get("maturity_band"), "contextScore": row.get("context_score"), "setupScore": row.get("setup_score"), "pivotPrice": row.get("pivot_price"), "lastClose": row.get("last_close"), "distanceToPivotPct": row.get("distance_to_pivot_pct"), "relativeStrength6m": row.get("relative_strength_6m"), "liquidityScore": context_inputs.get("liquidity"), "supportingPatterns": row.get("supporting_patterns") or [], "evidenceCount": row.get("evidence_count", 1)}
     result["bestFit"] = _best_fit(row, result)
     result["decision"] = build_decision(row, result)
+    result.update({
+        'patternGroup': row.get('pattern_group') or 'SETUP',
+        'timeframe': row.get('timeframe') or '1D',
+        'direction': row.get('direction') or 'NEUTRAL',
+        'intervalComplete': row.get('interval_complete', True),
+    })
     return result
 
 
@@ -423,7 +453,13 @@ def _pattern(row, evidence=()):
 
 
 def _evidence(row):
-    return {**_setup(row), "triggerDate": row.get("trigger_date"), "supportPrice": row.get("support_price"), "invalidationPrice": row.get("invalidation_price")}
+    return {
+        **_setup(row),
+        "triggerDate": row.get("trigger_date"),
+        "supportPrice": row.get("support_price"),
+        "invalidationPrice": row.get("invalidation_price"),
+        "measurements": row.get("measurements") or {},
+    }
 
 
 def _event(row):
@@ -466,6 +502,20 @@ def _decode_cursor(value):
 def _iso(value): return value.isoformat() if isinstance(value, date) else value
 def _number(value): return None if value is None else value
 def _latest_value(rows, key): return rows[0].get(key) if rows else None
+
+
+def _complete_pattern_type_facets(facets):
+    observed_types = {
+        str(item.get("value")): int(item.get("count") or 0)
+        for item in facets.get("patternTypes", []) if item.get("value")
+    }
+    return {
+        **facets,
+        "patternTypes": [
+            {"value": pattern_type, "count": observed_types.get(pattern_type, 0)}
+            for pattern_type in SUPPORTED_PATTERN_TYPES
+        ],
+    }
 def _regime_label(value):
     if value is None: return "UNAVAILABLE"
     value = Decimal(str(value))

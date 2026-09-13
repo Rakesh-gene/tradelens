@@ -6,14 +6,64 @@ import unittest
 
 from pattern_engine.enums import SwingType
 from pattern_engine.models import SwingPoint
-from pattern_engine.swings import build_price_zones, detect_swings
+from pattern_engine.swings import SwingZoneService, build_price_zones, detect_swings
 
 
 def _bar(day: date, high: int, low: int) -> dict[str, object]:
     return {"isin": "INE000000001", "trading_date": day, "high_price": Decimal(high), "low_price": Decimal(low)}
 
 
+class _SwingRepository:
+    def __init__(self, bars):
+        self.bars = bars
+        self.swings = []
+        self.zones = []
+
+    def load_adjusted_bars(self, *args):
+        return self.bars
+
+    def load_technical_features(self, *args):
+        return []
+
+    def load_swing_points(self, isin, from_date, to_date, feature_version, **kwargs):
+        return [row for row in self.swings if row["feature_version"] == feature_version]
+
+    def load_price_zones(self, isin, from_date, to_date, feature_version, **kwargs):
+        return [row for row in self.zones if row["feature_version"] == feature_version]
+
+    def upsert_swing_points(self, rows):
+        self.swings.extend(dict(row) for row in rows)
+        return len(rows)
+
+    def upsert_price_zones(self, rows):
+        self.zones.extend(dict(row) for row in rows)
+        return len(rows)
+
+
 class SwingAndZoneTestCase(unittest.TestCase):
+    def test_persisted_ids_are_distinct_by_feature_version_and_stable_on_rerun(self) -> None:
+        sessions = [date(2026, 1, day) for day in (2, 5, 6, 7, 9, 12, 13)]
+        repository = _SwingRepository([
+            _bar(day, high, low)
+            for day, high, low in zip(sessions, (91, 92, 93, 100, 94, 95, 96), (86, 87, 88, 89, 88, 87, 86))
+        ])
+        service = SwingZoneService(repository)
+
+        service.rebuild("INE000000001", sessions[0], sessions[-1], "adjusted-v1", "features-v1", "data-v1")
+        first_swing_id = repository.swings[-1]["id"]
+        first_zone_id = repository.zones[-1]["id"]
+        service.rebuild("INE000000001", sessions[0], sessions[-1], "adjusted-v1", "features-v2", "data-v1")
+        second_swing_id = repository.swings[-1]["id"]
+        second_zone_id = repository.zones[-1]["id"]
+
+        self.assertNotEqual(first_swing_id, second_swing_id)
+        self.assertNotEqual(first_zone_id, second_zone_id)
+        self.assertEqual(repository.zones[-1]["source_swing_ids"], (second_swing_id,))
+
+        service.rebuild("INE000000001", sessions[0], sessions[-1], "adjusted-v1", "features-v1", "data-v1")
+        self.assertEqual(repository.swings[-1]["id"], first_swing_id)
+        self.assertEqual(repository.zones[-1]["id"], first_zone_id)
+
     def test_pivot_is_invisible_until_third_subsequent_trading_session(self) -> None:
         sessions = [date(2026, 1, day) for day in (2, 5, 6, 7, 9, 12, 13)]  # Jan 8 is a non-trading weekday
         bars = [_bar(day, high, low) for day, high, low in zip(sessions, (91, 92, 93, 100, 94, 95, 96), (86, 87, 88, 89, 88, 87, 86))]

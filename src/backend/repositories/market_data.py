@@ -406,7 +406,7 @@ class PostgresMarketDataRepository:
             WHERE isin = %s AND trading_date <= %s
               AND (
                   adjustment_version = %s
-                  OR adjustment_version LIKE %s::text || ':%'
+                  OR adjustment_version LIKE %s::text || ':%%'
               )
             GROUP BY adjustment_version
             ORDER BY

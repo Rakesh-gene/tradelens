@@ -16,6 +16,10 @@ export function createPipelineRun(body, options = {}) {
   return authenticatedRequest('/api/admin/pipeline/runs', { ...options, method: 'POST', body })
 }
 
+export function createPatternScan(body, options = {}) {
+  return authenticatedRequest('/api/admin/pattern-scans', { ...options, method: 'POST', body })
+}
+
 export function controlPipelineRun(runId, action, options = {}) {
   return authenticatedRequest(`/api/admin/pipeline/runs/${encodeURIComponent(runId)}/${encodeURIComponent(action)}`, {
     ...options,

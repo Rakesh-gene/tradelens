@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from hashlib import sha256
@@ -36,8 +37,19 @@ class SwingZoneService:
         bars = self._repository.load_adjusted_bars(isin, from_date, to_date, adjustment_version)
         features = self._repository.load_technical_features(isin, from_date, to_date, feature_version)
         feature_by_date = {_bar_date(row): row for row in features}
-        swings = detect_swings(bars, feature_by_date, as_of=as_of)
+        existing_swings = self._repository.load_swing_points(
+            isin, from_date, to_date, feature_version, as_of=as_of,
+        )
+        swings = _assign_swing_ids(
+            detect_swings(bars, feature_by_date, as_of=as_of),
+            existing_swings,
+            feature_version,
+        )
         zones = build_price_zones(swings, as_of=as_of, lookback_start=from_date)
+        existing_zones = self._repository.load_price_zones(
+            isin, from_date, to_date, feature_version, as_of=as_of,
+        )
+        zones = _preserve_zone_ids(zones, existing_zones)
         swing_rows = [_swing_row(swing, feature_version, data_version) for swing in swings]
         zone_rows = [_zone_row(zone, feature_version, data_version) for zone in zones]
         return self._repository.upsert_swing_points(swing_rows), self._repository.upsert_price_zones(zone_rows)
@@ -168,9 +180,48 @@ def _swing_key(swing: SwingPoint) -> str:
     return f"swing:{swing.isin}:{swing.pivot_date.isoformat()}:{swing.swing_type.value}"
 
 
+def _assign_swing_ids(
+    swings: Sequence[SwingPoint], existing_rows: Sequence[Mapping[str, object]], feature_version: str,
+) -> list[SwingPoint]:
+    existing_ids = {
+        (_bar_date({"trading_date": row["pivot_date"]}), str(row["swing_type"])): str(row["id"])
+        for row in existing_rows
+        if row.get("id") is not None
+    }
+    return [
+        replace(
+            swing,
+            swing_id=existing_ids.get(
+                (swing.pivot_date, swing.swing_type.value),
+                str(uuid5(NAMESPACE_URL, f"{_swing_key(swing)}:{feature_version}")),
+            ),
+        )
+        for swing in swings
+    ]
+
+
+def _preserve_zone_ids(
+    zones: Sequence[PriceZone], existing_rows: Sequence[Mapping[str, object]],
+) -> list[PriceZone]:
+    existing_ids = {
+        (str(row["zone_type"]), date.fromisoformat(str(row["start_date"])), date.fromisoformat(str(row["end_date"]))): str(row["id"])
+        for row in existing_rows
+        if row.get("id") is not None
+    }
+    return [
+        replace(
+            zone,
+            zone_id=existing_ids.get(
+                (zone.zone_type.value, zone.start_date, zone.end_date), zone.zone_id,
+            ),
+        )
+        for zone in zones
+    ]
+
+
 def _swing_row(swing: SwingPoint, feature_version: str, data_version: str) -> dict[str, object]:
     row = {
-        "id": swing.swing_id or str(uuid5(NAMESPACE_URL, _swing_key(swing))), "isin": swing.isin,
+        "id": swing.swing_id or str(uuid5(NAMESPACE_URL, f"{_swing_key(swing)}:{feature_version}")), "isin": swing.isin,
         "pivot_date": swing.pivot_date, "confirmation_date": swing.confirmation_date,
         "swing_type": swing.swing_type.value, "price": swing.price, "natr_14": swing.natr,
         "move_size_pct": swing.move_size_pct, "is_meaningful": swing.is_meaningful,

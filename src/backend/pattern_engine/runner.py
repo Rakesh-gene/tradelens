@@ -16,9 +16,11 @@ from pattern_engine.breakout_detectors import detect_breakouts
 from pattern_engine.configuration import PatternEngineConfiguration
 from pattern_engine.enums import ImportJobType, ImportStatus, SwingType, ZoneType
 from pattern_engine.failure_detectors import detect_failures
+from pattern_engine.harmonic_detectors import detect_harmonic_patterns
 from pattern_engine.lifecycle import PatternLifecycleService
 from pattern_engine.models import DetectionContext, PatternCandidate, PriceZone, SwingPoint, serialize_value
 from pattern_engine.pullback_detectors import detect_pullbacks
+from pattern_engine.reversal_detectors import detect_reversal_patterns
 from pattern_engine.scoring import score_candidate
 from pattern_engine.supporting_detectors import detect_supporting_patterns
 
@@ -44,6 +46,7 @@ class PatternEngineVersions:
 class ScanTarget:
     security: Mapping[str, object]
     as_of_date: date
+    timeframes: tuple[str, ...] = ('1D',)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,13 +112,14 @@ class PatternEngineRunner:
     def run_security(
         self, isin: str, as_of_date: date, versions: PatternEngineVersions,
         *, dry_run: bool = False, initiated_by: str = "manual",
+        timeframes: Sequence[str] = ('1D',),
     ) -> PatternScanReport:
         security = next(
             (row for row in self._data.list_eligible_securities() if str(row.get("isin")) == isin),
             {"isin": isin},
         )
         return self._run(
-            PatternScanMode.DEBUG, (ScanTarget(security, as_of_date),), versions,
+            PatternScanMode.DEBUG, (ScanTarget(security, as_of_date, tuple(timeframes)),), versions,
             dry_run=dry_run, initiated_by=initiated_by,
         )
 
@@ -305,17 +309,22 @@ class PatternEngineRunner:
         decisions = [{"stage": "eligibility", "decisions": eligibility}]
         explanations = []
         created = updated = emitted = 0
+        observed_pattern_ids: set[str] = set()
         transaction = nullcontext(self._patterns) if dry_run else self._patterns.security_transaction(isin)
         with transaction as repository:
             lifecycle = PatternLifecycleService(repository, self._configuration)
             if not dry_run:
-                rebased = lifecycle.invalidate_adjustment_mismatches(
-                    isin, versions.adjustment, as_of
+                rebased = lifecycle.invalidate_lineage_mismatches(
+                    isin,
+                    as_of,
+                    engine_version=versions.engine,
+                    feature_version=versions.feature,
+                    adjustment_version=versions.adjustment,
                 )
                 updated += len(rebased)
                 emitted += len(rebased)
                 decisions.append({
-                    "stage": "adjustment_rebase",
+                    "stage": "lineage_reconciliation",
                     "invalidated": len(rebased),
                 })
             # Historical/dry evaluation must not leak today's live instances
@@ -335,7 +344,7 @@ class PatternEngineRunner:
             for stage, candidates in stage_candidates:
                 counts = self._process_stage(
                     stage, candidates, current_feature, bars, context, lifecycle,
-                    versions, dry_run, decisions, explanations,
+                    versions, dry_run, decisions, explanations, observed_pattern_ids,
                 )
                 created += counts[0]; updated += counts[1]; emitted += counts[2]
             decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
@@ -344,17 +353,44 @@ class PatternEngineRunner:
             bases = detect_primary_bases(
                 security, bars, features, swings, zones, context, self._configuration
             )
-            counts = self._process_stage("bases", bases, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations)
+            counts = self._process_stage("bases", bases, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations, observed_pattern_ids)
             created += counts[0]; updated += counts[1]; emitted += counts[2]
             decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
             active = _normalize_instances(repository.load_active_patterns(isin)) if not dry_run else active + list(bases)
+
+            for timeframe in target.timeframes:
+                stage_started = perf_counter()
+                reversals = detect_reversal_patterns(
+                    security, bars, swings, context, self._configuration,
+                    timeframe=timeframe,
+                )
+                counts = self._process_stage(
+                    f'reversals_{timeframe}', reversals, current_feature, bars,
+                    context, lifecycle, versions, dry_run, decisions, explanations,
+                    observed_pattern_ids,
+                )
+                created += counts[0]; updated += counts[1]; emitted += counts[2]
+                decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
+
+                stage_started = perf_counter()
+                harmonics = detect_harmonic_patterns(
+                    security, bars, swings, context, self._configuration,
+                    timeframe=timeframe,
+                )
+                counts = self._process_stage(
+                    f'harmonics_{timeframe}', harmonics, current_feature, bars,
+                    context, lifecycle, versions, dry_run, decisions, explanations,
+                    observed_pattern_ids,
+                )
+                created += counts[0]; updated += counts[1]; emitted += counts[2]
+                decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
 
             stage_started = perf_counter()
             breakouts = detect_breakouts(
                 security, bars, features, zones, context, self._configuration,
                 [source for source in active if str(_field(source, "pattern_type")).startswith("BASE-")],
             )
-            counts = self._process_stage("breakouts", breakouts, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations)
+            counts = self._process_stage("breakouts", breakouts, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations, observed_pattern_ids)
             created += counts[0]; updated += counts[1]; emitted += counts[2]
             decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
             active = _normalize_instances(repository.load_active_patterns(isin)) if not dry_run else active + list(breakouts)
@@ -365,7 +401,7 @@ class PatternEngineRunner:
                 [source for source in active if str(_field(source, "pattern_type")).startswith("BRK-")],
                 context, self._configuration,
             )
-            counts = self._process_stage("pullbacks", pullbacks, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations)
+            counts = self._process_stage("pullbacks", pullbacks, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations, observed_pattern_ids)
             created += counts[0]; updated += counts[1]; emitted += counts[2]
             decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
             active = _normalize_instances(repository.load_active_patterns(isin)) if not dry_run else active + list(pullbacks)
@@ -374,14 +410,29 @@ class PatternEngineRunner:
             failures = detect_failures(
                 security, bars, features, swings, active, context, self._configuration
             )
-            counts = self._process_stage("failures", failures, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations)
+            counts = self._process_stage("failures", failures, current_feature, bars, context, lifecycle, versions, dry_run, decisions, explanations, observed_pattern_ids)
             created += counts[0]; updated += counts[1]; emitted += counts[2]
             decisions[-1]["durationMs"] = round((perf_counter() - stage_started) * 1000)
             if not dry_run:
-                expirations = lifecycle.expire_stale(isin, as_of, [_row_date(bar) for bar in bars])
+                expirations = lifecycle.expire_stale(
+                    isin,
+                    as_of,
+                    [_row_date(bar) for bar in bars],
+                    observed_pattern_ids=observed_pattern_ids,
+                )
                 updated += len(expirations)
                 emitted += sum(result.event_type is not None for result in expirations)
                 decisions.append({"stage": "expiry", "expired": len(expirations)})
+                reconciled = lifecycle.reconcile_unobserved(
+                    isin, as_of, observed_pattern_ids, target.timeframes
+                )
+                updated += len(reconciled)
+                emitted += sum(result.event_type is not None for result in reconciled)
+                decisions.append({
+                    "stage": "active_reconciliation",
+                    "expired": sum(result.action == "expired" for result in reconciled),
+                    "invalidated": sum(result.action == "invalidated" for result in reconciled),
+                })
         return SecurityScanOutcome(
             isin, as_of, "COMPLETED", None, tuple(decisions), tuple(explanations),
             created, updated, emitted,
@@ -389,7 +440,7 @@ class PatternEngineRunner:
 
     def _process_stage(
         self, stage, candidates, feature, bars, context, lifecycle, versions,
-        dry_run, decisions, explanations,
+        dry_run, decisions, explanations, observed_pattern_ids,
     ):
         decisions.append({
             "stage": stage, "candidateCount": len(candidates),
@@ -440,6 +491,7 @@ class PatternEngineRunner:
                 scored_candidate, engine_version=versions.engine,
                 feature_version=versions.feature, adjustment_version=versions.adjustment,
             )
+            observed_pattern_ids.add(str(result.instance["id"]))
             created += result.action == "created"
             updated += result.action == "updated"
             events += result.event_type is not None

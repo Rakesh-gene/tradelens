@@ -13,6 +13,12 @@ class PatternClass(StrEnum):
     FAILURE = "FAILURE"
 
 
+    REVERSAL = 'REVERSAL'
+    CONTINUATION = 'CONTINUATION'
+    HARMONIC = 'HARMONIC'
+    CANDLESTICK = 'CANDLESTICK'
+
+
 class PatternState(StrEnum):
     DETECTED = "DETECTED"
     FORMING = "FORMING"
@@ -70,6 +76,11 @@ class ImportStatus(StrEnum):
 
 # Stable public inventory emitted by the production detector pipeline.
 SUPPORTED_PATTERN_TYPES = (
+    'REV-DBOT', 'REV-DTOP', 'REV-IHS', 'REV-HS', 'REV-CUP',
+    'CONT-FLAG-BULL', 'CONT-FLAG-BEAR', 'CONT-TRI-ASC', 'CONT-TRI-DESC',
+    'CONT-TRI-SYM', 'CONT-WEDGE-FALL', 'CONT-WEDGE-RISE', 'CONT-RECT',
+    'HARM-ABCD', 'HARM-GARTLEY', 'HARM-BAT', 'HARM-BUTTERFLY',
+    'HARM-CRAB', 'HARM-CYPHER', 'HARM-SHARK', 'HARM-5O',
     "BASE-VCP", "BASE-FLAT", "BASE-52WH", "BASE-TIGHT",
     "BRK-RANGE", "BRK-52WH", "BRK-ATH", "BRK-MULTIY",
     "PB-BRKRET", "PB-EMA20", "PB-SMA50",

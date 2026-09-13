@@ -130,6 +130,8 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_pattern_path(path):
+        if path == '/api/patterns':
+            return True
         if path in {"/api/overview", "/api/setups", "/api/securities/search", "/api/sectors/rotation", "/api/sectors/stocks"}:
             return True
         parts = path.strip("/").split("/")
@@ -143,6 +145,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         )
 
     def _pattern_get(self, path, query):
+        if path == '/api/patterns':
+            return self.pattern_service.pattern_scanner(query)
         if path == "/api/sectors/rotation":
             return self.pattern_service.sector_rotation(query)
         if path == "/api/sectors/stocks":
@@ -197,14 +201,17 @@ class ApiHandler(BaseHTTPRequestHandler):
                 result,
             )
             return
-        if path == "/api/admin/pipeline/runs":
+        if path in {'/api/admin/pipeline/runs', '/api/admin/pattern-scans'}:
             user = self._authorize_admin()
             if user is None:
                 return
             try:
-                result = self.admin_pipeline_service.start(
-                    self._read_json(), str(user.get("id") or "")
+                start = (
+                    self.admin_pipeline_service.start_pattern_scan
+                    if path == '/api/admin/pattern-scans'
+                    else self.admin_pipeline_service.start
                 )
+                result = start(self._read_json(), str(user.get('id') or ''))
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return

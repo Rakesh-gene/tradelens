@@ -190,6 +190,32 @@ class PatternEngineRunnerTestCase(unittest.TestCase):
         self.assertEqual("B", report.outcomes[0].isin)
         self.assertEqual("daily-run", self.runs.created[0][2]["configuration"]["sourceRunId"])
 
+    def test_completed_scan_expires_a_previously_active_condition_that_disappears(self):
+        first_date = date(2026, 9, 5)
+        first_patches = self._detector_patches(
+            lambda security, *args: [_candidate(str(security["isin"]), first_date)]
+        )
+        with first_patches[0], first_patches[1], first_patches[2], first_patches[3], first_patches[4]:
+            self._runner(FakeDataSource()).run_security("GOOD", first_date, _VERSIONS)
+
+        second_patches = self._detector_patches(lambda *args: [])
+        with second_patches[0], second_patches[1], second_patches[2], second_patches[3], second_patches[4]:
+            report = self._runner(FakeDataSource()).run_security(
+                "GOOD", first_date + timedelta(days=1), _VERSIONS
+            )
+
+        instance = next(iter(self.patterns.instances.values()))
+        self.assertEqual(PatternState.EXPIRED.value, instance["state"])
+        self.assertEqual(
+            "CONDITION_NOT_PRESENT_IN_COMPLETED_SCAN",
+            instance["measurements"]["expiration_reason"],
+        )
+        reconciliation = next(
+            item for item in report.outcomes[0].stage_decisions
+            if item["stage"] == "active_reconciliation"
+        )
+        self.assertEqual(1, reconciliation["expired"])
+
     def test_replay_uses_each_historical_session_without_live_writes(self):
         start = date(2026, 9, 4)
         data = FakeDataSource()

@@ -116,6 +116,17 @@ class AdminPipelineService:
         trigger_source: str = "MANUAL",
         scheduled_for: date | None = None,
     ) -> dict[str, object]:
+        run_kind = str(payload.get('runKind') or 'FULL_PIPELINE').strip().upper()
+        if run_kind not in {'FULL_PIPELINE', 'PATTERN_DISCOVERY'}:
+            raise ValueError('runKind must be FULL_PIPELINE or PATTERN_DISCOVERY')
+        raw_timeframes = payload.get('timeframes') or (
+            ['1D', '1W', '1M'] if run_kind == 'PATTERN_DISCOVERY' else ['1D']
+        )
+        if not isinstance(raw_timeframes, list) or not raw_timeframes:
+            raise ValueError('timeframes must be a non-empty array')
+        timeframes = tuple(dict.fromkeys(str(value).upper() for value in raw_timeframes))
+        if any(value not in {'1D', '1W', '1M'} for value in timeframes):
+            raise ValueError('timeframes may contain only 1D, 1W, or 1M')
         raw_isins = payload.get("isins")
         run_all = payload.get("allEquities") is True
         if raw_isins is None:
@@ -153,7 +164,18 @@ class AdminPipelineService:
             by_isin = {str(row["isin"]): row for row in securities}
             ordered = [by_isin[isin] for isin in isins]
         versions = self._versions()
+        raw_pattern_groups = payload.get('patternGroups') or []
+        if not isinstance(raw_pattern_groups, list):
+            raise ValueError('patternGroups must be an array')
+        pattern_groups = tuple(dict.fromkeys(
+            str(value).strip().upper() for value in raw_pattern_groups if str(value).strip()
+        ))
+        if any(value not in {'SETUP', 'REVERSAL', 'CONTINUATION', 'HARMONIC'} for value in pattern_groups):
+            raise ValueError('patternGroups contains an unsupported pattern family')
         values = {
+            'run_kind': run_kind,
+            'requested_timeframes': timeframes,
+            'pattern_groups': pattern_groups,
             "requested_by": requested_by,
             "requested_from_date": from_date,
             "requested_to_date": to_date,
@@ -170,11 +192,23 @@ class AdminPipelineService:
             "scheduled_for": scheduled_for,
         }
         run_id = self._repository.create_pipeline_run(values, ordered)
-        self._executor(lambda: self._execute(
-            run_id, ordered, from_date, to_date, versions,
-            values["force_refresh"], batch_size, trigger_source=trigger_source,
-        ))
+        if run_kind == 'PATTERN_DISCOVERY':
+            self._executor(lambda: self._execute_pattern_only(
+                run_id, ordered, from_date, to_date, versions,
+                values["force_refresh"], batch_size, trigger_source=trigger_source,
+                timeframes=timeframes,
+            ))
+        else:
+            self._executor(lambda: self._execute(
+                run_id, ordered, from_date, to_date, versions,
+                values["force_refresh"], batch_size, trigger_source=trigger_source,
+            ))
         return self.get_run(run_id)
+
+    def start_pattern_scan(self, payload, requested_by):
+        values = dict(payload)
+        values['runKind'] = 'PATTERN_DISCOVERY'
+        return self.start(values, requested_by)
 
     def ensure_scheduled_run(self, scheduled_for: date, *, batch_size: int = 25) -> str:
         """Start today's incremental run once no other pipeline run is active."""
@@ -236,17 +270,22 @@ class AdminPipelineService:
             str(versions["engine"]), str(versions["feature"]), str(versions["adjustment"])
         )
         completed = int(run.get("securities_completed") or 0)
-        self._executor(lambda: self._execute(
-            run_id,
-            securities,
-            run["requested_from_date"],
-            run["requested_to_date"],
-            version_set,
-            bool(run.get("force_refresh")),
+        arguments = (
+            run_id, securities, run["requested_from_date"], run["requested_to_date"],
+            version_set, bool(run.get("force_refresh")),
             int(run.get("batch_size") or self.DEFAULT_BATCH_SIZE),
-            completed=completed,
-            trigger_source=str(run.get("trigger_source") or "MANUAL"),
-        ))
+        )
+        options = {
+            'completed': completed,
+            'trigger_source': str(run.get("trigger_source") or "MANUAL"),
+        }
+        if str(run.get('run_kind') or 'FULL_PIPELINE') == 'PATTERN_DISCOVERY':
+            self._executor(lambda: self._execute_pattern_only(
+                *arguments, **options,
+                timeframes=tuple(run.get('requested_timeframes') or ('1D',)),
+            ))
+        else:
+            self._executor(lambda: self._execute(*arguments, **options))
         return self.get_run(run_id)
 
     def _require_run(self, run_id):
@@ -254,6 +293,40 @@ class AdminPipelineService:
         if run is None:
             raise LookupError("Pipeline run not found")
         return run
+
+    def _execute_pattern_only(
+        self, run_id, securities, from_date, to_date, versions, force_refresh,
+        batch_size, *, completed=0, trigger_source='MANUAL', timeframes=('1D',),
+    ):
+        failed = 0
+        errors = []
+        self._repository.update_pipeline_run(run_id, 'RUNNING', started=True)
+        for security in securities:
+            if self._repository.pipeline_run_status(run_id) in {'PAUSED', 'TERMINATED'}:
+                return
+            isin, symbol = str(security['isin']), str(security['symbol'])
+            self._repository.update_pipeline_item(run_id, isin, 'RUNNING', 'PATTERN_DISCOVERY', started=True)
+            try:
+                rebuilt = self._recovery.rebuild_security(
+                    isin, from_date, to_date, versions, dry_run=False,
+                    timeframes=timeframes,
+                )
+                if rebuilt.get('status') not in {ImportStatus.COMPLETED.value, 'COMPLETED'}:
+                    raise RuntimeError('Pattern discovery did not complete')
+                self._repository.update_pipeline_item(
+                    run_id, isin, 'COMPLETED', 'COMPLETED', pattern_run_id=rebuilt.get('runId'),
+                    candidates_detected=int(rebuilt.get('metrics', {}).get('candidatesDetected') or 0), finished=True,
+                )
+                completed += 1
+            except Exception as error:
+                failed += 1
+                message = str(error).replace(chr(10), ' ')[:1000]
+                errors.append(f'{symbol}: {message}')
+                self._repository.update_pipeline_item(run_id, isin, 'FAILED', 'FAILED', error_message=message, finished=True)
+            self._repository.update_pipeline_run(run_id, 'RUNNING', securities_completed=completed, securities_failed=failed)
+        status = 'PARTIAL' if completed and failed else 'FAILED' if failed else 'COMPLETED'
+        self._repository.update_pipeline_run(run_id, status, securities_completed=completed,
+            securities_failed=failed, error_summary='; '.join(errors[:20]) or None, finished=True)
 
     def _execute(
         self, run_id, securities, from_date, to_date, versions, force_refresh,
@@ -549,6 +622,7 @@ class DisabledAdminPipelineService:
     def get_run(self, run_id, query=None): raise LookupError("Pipeline run not found")
     def start(self, payload, requested_by): raise RuntimeError("Admin pipeline is not configured")
     def ensure_scheduled_run(self, scheduled_for, *, batch_size=25): return "DISABLED"
+    def start_pattern_scan(self, payload, requested_by): raise RuntimeError('Admin pipeline is not configured')
     def recover_interrupted_runs(self): return 0
     def pause(self, run_id): raise RuntimeError("Admin pipeline is not configured")
     def resume(self, run_id): raise RuntimeError("Admin pipeline is not configured")
@@ -570,6 +644,9 @@ def _equity_payload(row):
 
 def _run_payload(row, *, include_items, item_page=1, item_page_size=25):
     result = {
+        'runKind': row.get('run_kind') or 'FULL_PIPELINE',
+        'requestedTimeframes': list(row.get('requested_timeframes') or ('1D',)),
+        'patternGroups': list(row.get('pattern_groups') or ()),
         "runId": row.get("id"), "status": row.get("status"),
         "fromDate": row.get("requested_from_date"), "toDate": row.get("requested_to_date"),
         "versions": row.get("versions") or {}, "forceRefresh": bool(row.get("force_refresh")),

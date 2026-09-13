@@ -1,0 +1,15 @@
+ALTER TABLE pattern_instances ADD COLUMN IF NOT EXISTS timeframe TEXT NOT NULL DEFAULT '1D';
+ALTER TABLE pattern_instances ADD COLUMN IF NOT EXISTS pattern_group TEXT NOT NULL DEFAULT 'SETUP';
+ALTER TABLE pattern_instances ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'NEUTRAL';
+ALTER TABLE pattern_instances ADD COLUMN IF NOT EXISTS interval_complete BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE pattern_instances DROP CONSTRAINT IF EXISTS pattern_instances_pattern_class_check;
+ALTER TABLE pattern_instances ADD CONSTRAINT pattern_instances_pattern_class_check CHECK (pattern_class IN ('TREND','BASE','BREAKOUT','PULLBACK','REVERSAL','CONTINUATION','HARMONIC','CANDLESTICK','COMPRESSION','MOMENTUM','FAILURE'));
+ALTER TABLE pattern_instances DROP CONSTRAINT IF EXISTS pattern_instances_timeframe_check;
+ALTER TABLE pattern_instances ADD CONSTRAINT pattern_instances_timeframe_check CHECK (timeframe IN ('1D','1W','1M'));
+ALTER TABLE pattern_instances DROP CONSTRAINT IF EXISTS pattern_instances_direction_check;
+ALTER TABLE pattern_instances ADD CONSTRAINT pattern_instances_direction_check CHECK (direction IN ('BULLISH','BEARISH','NEUTRAL'));
+ALTER TABLE admin_pipeline_runs ADD COLUMN IF NOT EXISTS run_kind TEXT NOT NULL DEFAULT 'FULL_PIPELINE';
+ALTER TABLE admin_pipeline_runs ADD COLUMN IF NOT EXISTS requested_timeframes JSONB NOT NULL DEFAULT '["1D"]'::JSONB;
+ALTER TABLE admin_pipeline_runs ADD COLUMN IF NOT EXISTS pattern_groups JSONB NOT NULL DEFAULT '[]'::JSONB;
+CREATE INDEX IF NOT EXISTS pattern_instances_scanner_idx ON pattern_instances (timeframe, pattern_group, direction, state, last_updated_date DESC, quality_score DESC);
+CREATE INDEX IF NOT EXISTS admin_pipeline_runs_kind_created_idx ON admin_pipeline_runs (run_kind, created_at DESC);

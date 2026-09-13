@@ -81,6 +81,14 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             if filters.get(key):
                 clauses.append(f"{column} = %({key})s")
                 parameters[key] = filters[key]
+        clauses.append('p.timeframe = %(timeframe)s')
+        parameters['timeframe'] = filters.get('timeframe') or '1D'
+        if filters.get('pattern_group'):
+            clauses.append('p.pattern_group = %(pattern_group)s')
+            parameters['pattern_group'] = filters['pattern_group']
+        if filters.get('pattern_direction'):
+            clauses.append('p.direction = %(pattern_direction)s')
+            parameters['pattern_direction'] = filters['pattern_direction']
         if filters.get("states"):
             clauses.append("p.state = ANY(%(states)s)")
             parameters["states"] = list(filters["states"])
@@ -250,6 +258,9 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
         return {
             "states": self._facet("p.state", as_of),
             "patternTypes": self._facet("p.pattern_type", as_of),
+            "patternGroups": self._facet("p.pattern_group", as_of),
+            "directions": self._facet("p.direction", as_of),
+            "timeframes": self._facet("p.timeframe", as_of),
             "sectors": self._fetch_all(
                 """
                 SELECT membership.sector_code AS value, sectors.name AS label, COUNT(*) AS count
@@ -283,22 +294,60 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                     (SELECT MAX(trading_date) FROM latest_features),
                     (SELECT value FROM requested_date)
                 ) AS value
+            ), benchmark_history AS (
+                SELECT trading_date, close_price,
+                       ROW_NUMBER() OVER (ORDER BY trading_date DESC) AS recency
+                FROM index_daily_bars
+                WHERE index_code = 'NIFTY 500'
+                  AND trading_date <= (SELECT value FROM selected_date)
+            ), benchmark_stats AS (
+                SELECT COUNT(*) FILTER (WHERE recency <= 200) AS history_sessions,
+                       MAX(close_price) FILTER (WHERE recency = 1) AS latest_close,
+                       AVG(close_price) FILTER (WHERE recency BETWEEN 1 AND 20) AS sma20,
+                       AVG(close_price) FILTER (WHERE recency BETWEEN 2 AND 21) AS prior_sma20,
+                       AVG(close_price) FILTER (WHERE recency BETWEEN 1 AND 50) AS sma50,
+                       AVG(close_price) FILTER (WHERE recency BETWEEN 2 AND 51) AS prior_sma50,
+                       AVG(close_price) FILTER (WHERE recency BETWEEN 1 AND 200) AS sma200
+                FROM benchmark_history
+                WHERE recency <= 200
             )
             SELECT selected_date.value AS data_as_of,
-                   COUNT(*) FILTER (WHERE p.state = 'READY') AS ready_count,
-                   COUNT(*) FILTER (WHERE p.state = 'TRIGGERED') AS triggered_count,
-                   COUNT(*) FILTER (WHERE p.state = 'CONFIRMED') AS confirmed_count,
-                   COUNT(*) FILTER (WHERE p.state = 'FAILED') AS failed_count,
-                   COUNT(*) FILTER (WHERE p.pattern_class = 'BREAKOUT' AND p.state IN ('TRIGGERED','CONFIRMED')) AS breakouts,
-                   COUNT(*) FILTER (WHERE p.pattern_type = 'FAIL-BRK') AS failed_breakouts,
-                   AVG(p.context_score) AS regime_score,
+                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'READY') AS ready_count,
+                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'TRIGGERED') AS triggered_count,
+                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'CONFIRMED') AS confirmed_count,
+                   COUNT(DISTINCT failed.isin) AS failed_count,
+                   COUNT(DISTINCT p.isin) FILTER (
+                       WHERE p.pattern_class = 'BREAKOUT'
+                         AND p.state IN ('TRIGGERED','CONFIRMED')
+                   ) AS breakouts,
+                   COUNT(DISTINCT p.isin) FILTER (WHERE p.pattern_type = 'FAIL-BRK') AS failed_breakouts,
+                   CASE WHEN benchmark_stats.history_sessions < 200 THEN 0
+                        ELSE (CASE WHEN benchmark_stats.latest_close > benchmark_stats.sma20 THEN 20 ELSE 0 END
+                            + CASE WHEN benchmark_stats.latest_close > benchmark_stats.sma50 THEN 20 ELSE 0 END
+                            + CASE WHEN benchmark_stats.latest_close > benchmark_stats.sma200 THEN 20 ELSE 0 END
+                            + CASE WHEN benchmark_stats.sma20 > benchmark_stats.prior_sma20 THEN 20 ELSE 0 END
+                            + CASE WHEN benchmark_stats.sma50 > benchmark_stats.prior_sma50 THEN 20 ELSE 0 END)
+                   END AS regime_score,
                    (SELECT AVG(CASE WHEN f.distance_to_ema_20_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_ema20_pct,
                    (SELECT AVG(CASE WHEN f.distance_to_sma_50_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_sma50_pct,
                    (SELECT AVG(CASE WHEN f.distance_to_sma_200_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_sma200_pct,
-                   (SELECT COUNT(*) FROM latest_features f WHERE f.distance_to_52_week_high_pct = 0) AS new_52_week_highs
-            FROM selected_date LEFT JOIN pattern_instances p
-              ON p.last_updated_date = selected_date.value
-            GROUP BY selected_date.value
+                   (SELECT COUNT(*) FROM latest_features f WHERE f.distance_to_52_week_high_pct >= 0) AS new_52_week_highs
+            FROM selected_date
+            CROSS JOIN benchmark_stats
+            LEFT JOIN pattern_instances p
+              ON p.last_updated_date <= selected_date.value
+             AND p.terminal_date IS NULL
+             AND p.pattern_group = 'SETUP'
+             AND p.timeframe = '1D'
+            LEFT JOIN pattern_instances failed
+              ON failed.last_updated_date = selected_date.value
+             AND failed.state = 'FAILED'
+             AND failed.pattern_group = 'SETUP'
+             AND failed.timeframe = '1D'
+            GROUP BY selected_date.value, benchmark_stats.history_sessions,
+                     benchmark_stats.latest_close, benchmark_stats.sma20,
+                     benchmark_stats.prior_sma20, benchmark_stats.sma50,
+                     benchmark_stats.prior_sma50, benchmark_stats.sma200
             """, (as_of,),
         ) or {}
 
@@ -456,6 +505,14 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             (isin, as_of, limit),
         )
 
+    def list_chart_patterns(self, isin, as_of, start_date, limit=500):
+        return self._fetch_all(
+            """SELECT * FROM pattern_instances
+               WHERE isin = %s AND detected_date >= %s AND detected_date <= %s
+               ORDER BY detected_date, id LIMIT %s""",
+            (isin, start_date, as_of, limit),
+        )
+
     def list_security_events(self, isin, as_of, limit=25):
         return self._fetch_all(
             """SELECT event.* FROM pattern_events event
@@ -466,7 +523,9 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
         )
 
     def _facet(self, column, as_of):
-        if column not in {"p.state", "p.pattern_type"}:
+        if column not in {
+            "p.state", "p.pattern_type", "p.pattern_group", "p.direction", "p.timeframe",
+        }:
             raise ValueError("Unsupported facet")
         return self._fetch_all(
             f"SELECT {column} AS value, COUNT(*) AS count FROM pattern_instances p WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL GROUP BY {column} ORDER BY count DESC, value",
@@ -518,6 +577,8 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         checks = {
             "pattern_class": "pattern_class", "pattern_type": "pattern_type",
             "variant": "variant", "sector": "sector_code",
+            "timeframe": "timeframe", "pattern_group": "pattern_group",
+            "pattern_direction": "direction",
         }
         for key, field in checks.items():
             if filters.get(key): rows = [row for row in rows if row.get(field) == filters[key]]
@@ -567,12 +628,59 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
             values = {}
             for row in self.patterns: values[row.get(field)] = values.get(row.get(field), 0) + 1
             return [{"value": key, "count": value} for key, value in values.items() if key]
-        return {"states": counts("state"), "patternTypes": counts("pattern_type"), "sectors": []}
+        return {
+            "states": counts("state"),
+            "patternTypes": counts("pattern_type"),
+            "patternGroups": counts("pattern_group"),
+            "directions": counts("direction"),
+            "timeframes": counts("timeframe"),
+            "sectors": [],
+        }
 
     def overview_summary(self, as_of):
         selected = as_of or max((row["last_updated_date"] for row in self.patterns), default=None)
-        rows = [row for row in self.patterns if row.get("last_updated_date") == selected]
-        return {"data_as_of": selected, **{f"{state.lower()}_count": sum(row.get("state") == state for row in rows) for state in ("READY", "TRIGGERED", "CONFIRMED", "FAILED")}, "breakouts": sum(row.get("pattern_class") == "BREAKOUT" for row in rows), "failed_breakouts": sum(row.get("pattern_type") == "FAIL-BRK" for row in rows), "regime_score": None, "above_ema20_pct": None, "above_sma50_pct": None, "above_sma200_pct": None, "new_52_week_highs": 0}
+        eligible = [
+            self._joined(row, selected)
+            for row in self.patterns
+            if row.get("last_updated_date") <= selected
+            and row.get("terminal_date") is None
+            and (row.get("pattern_group") or "SETUP") == "SETUP"
+            and (row.get("timeframe") or "1D") == "1D"
+        ]
+        failures = [
+            row for row in self.patterns
+            if row.get("last_updated_date") == selected
+            and row.get("state") == "FAILED"
+            and (row.get("pattern_group") or "SETUP") == "SETUP"
+            and (row.get("timeframe") or "1D") == "1D"
+        ]
+        distinct = lambda rows: len({row.get("isin") for row in rows})
+        return {
+            "data_as_of": selected,
+            **{
+                f"{state.lower()}_count": distinct(
+                    [row for row in eligible if row.get("state") == state]
+                )
+                for state in ("READY", "TRIGGERED", "CONFIRMED")
+            },
+            "failed_count": distinct(failures),
+            "breakouts": distinct([
+                row for row in eligible
+                if row.get("pattern_class") == "BREAKOUT"
+                and row.get("state") in {"TRIGGERED", "CONFIRMED"}
+            ]),
+            "failed_breakouts": distinct([
+                row for row in eligible if row.get("pattern_type") == "FAIL-BRK"
+            ]),
+            "regime_score": None, "above_ema20_pct": None,
+            "above_sma50_pct": None, "above_sma200_pct": None,
+            "new_52_week_highs": sum(
+                feature.get("trading_date") == selected
+                and feature.get("distance_to_52_week_high_pct") is not None
+                and feature.get("distance_to_52_week_high_pct") >= 0
+                for feature in self.features
+            ),
+        }
 
     def latest_scan_run(self): return dict(self.run)
     def get_pattern(self, pattern_id):
@@ -595,11 +703,16 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         rows = [row for row in self.features if row.get("isin") == isin and row.get("trading_date") <= as_of]
         return max(rows, key=lambda row: row["trading_date"], default=None)
     def list_security_patterns(self, isin, as_of, limit=50): return [row for row in self.patterns if row.get("isin") == isin and row.get("detected_date") <= as_of][:limit]
+    def list_chart_patterns(self, isin, as_of, start_date, limit=500): return sorted([row for row in self.patterns if row.get("isin") == isin and start_date <= row.get("detected_date") <= as_of], key=lambda row: (row.get("detected_date"), str(row.get("id"))))[:limit]
     def list_security_events(self, isin, as_of, limit=25):
         ids = {str(row.get("id")) for row in self.patterns if row.get("isin") == isin}
         return [row for row in self.events if str(row.get("pattern_instance_id")) in ids and row.get("effective_date") <= as_of][:limit]
     def _joined(self, row, as_of):
         result = dict(row)
+        result.setdefault("timeframe", "1D")
+        result.setdefault("pattern_group", "SETUP")
+        result.setdefault("direction", "NEUTRAL")
+        result.setdefault("interval_complete", True)
         security = self.securities.get(str(row.get("isin")), {})
         result.update({"symbol": security.get("symbol"), "company_name": security.get("company_name"), "sector_code": security.get("sector_code"), "sector_name": security.get("sector_name")})
         feature = self.get_latest_feature(str(row.get("isin")), as_of) or {}

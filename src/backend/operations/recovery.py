@@ -21,11 +21,15 @@ class RecoveryService:
         self._configuration = configuration
         self._logger = logger
 
-    def rebuild_security(self, isin, from_date, to_date, versions, *, dry_run=False):
+    def rebuild_security(
+        self, isin, from_date, to_date, versions, *, dry_run=False,
+        timeframes=('1D',),
+    ):
         if from_date > to_date: raise ValueError("from_date cannot be after to_date")
         if dry_run:
             return {"isin": isin, "fromDate": from_date, "toDate": to_date, "versions": versions, "dryRun": True}
         prepared = self.prepare_security(isin, from_date, to_date, versions)
+        prepared['timeframes'] = tuple(timeframes)
         return self.scan_prepared_security(prepared)
 
     def prepare_security(self, isin, from_date, to_date, versions):
@@ -82,8 +86,12 @@ class RecoveryService:
         started = perf_counter()
         isin = prepared["isin"]
         effective_to_date = prepared["asOf"]
+        run_options = {'initiated_by': 'recovery'}
+        timeframes = tuple(prepared.get('timeframes') or ('1D',))
+        if timeframes != ('1D',):
+            run_options['timeframes'] = timeframes
         report = self._runner.run_security(
-            isin, effective_to_date, prepared["versions"], initiated_by="recovery"
+            isin, effective_to_date, prepared["versions"], **run_options,
         )
         failures = [
             {

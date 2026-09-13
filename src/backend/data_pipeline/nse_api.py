@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import http.cookiejar
 import json
 import random
@@ -49,6 +49,7 @@ class NseApiClient:
     EQUITIES_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
     EQUITY_HISTORY_URL = f"{API_URL}/NextApi/apiClient/GetQuoteApi"
     CORPORATE_ACTIONS_URL = f"{API_URL}/corporates-corporateActions"
+    HOLIDAY_MASTER_URL = f"{API_URL}/holiday-master"
     INDEX_HISTORY_URL = f"{API_URL}/historical/indicesHistory"
     INDEX_HISTORY_FALLBACK_URL = "https://niftyindices.com/BackPage/getHistoricaldatatabletoString"
     EOD_REPORT_URL_TEMPLATE = (
@@ -115,6 +116,7 @@ class NseApiClient:
         self._corporate_action_symbol_cache: dict[
             tuple[date, date], dict[str, list[Mapping[str, object]]]
         ] = {}
+        self._trading_holiday_cache: dict[int, set[date]] = {}
         self._metrics = {
             "requestAttempts": 0, "successfulRequests": 0,
             "rateLimitedRequests": 0, "blockedRequests": 0,
@@ -134,6 +136,30 @@ class NseApiClient:
         """Download the NSE equity master CSV after validating it is not an error page."""
 
         return self._download_file(self.EQUITIES_URL, "equity master CSV")
+
+    def is_equity_trading_day(self, market_date: date) -> bool:
+        """Use NSE's cash-market calendar; weekends never require a source call."""
+        if market_date.weekday() >= 5:
+            return False
+        with self._corporate_action_lock:
+            holidays = self._trading_holiday_cache.get(market_date.year)
+        if holidays is None:
+            payload = self._request_json(self.HOLIDAY_MASTER_URL, {"type": "trading"})
+            cash_market = payload.get("CM", []) if isinstance(payload, Mapping) else []
+            holidays = set()
+            for item in cash_market:
+                raw_date = item.get("tradingDate") if isinstance(item, Mapping) else None
+                if not isinstance(raw_date, str):
+                    continue
+                try:
+                    parsed = datetime.strptime(raw_date.strip(), "%d-%b-%Y").date()
+                except ValueError:
+                    continue
+                if parsed.year == market_date.year:
+                    holidays.add(parsed)
+            with self._corporate_action_lock:
+                self._trading_holiday_cache[market_date.year] = holidays
+        return market_date not in holidays
 
     def fetch_equity_classification(
         self, symbol: str, expected_isin: str

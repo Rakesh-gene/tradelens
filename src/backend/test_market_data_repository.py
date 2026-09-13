@@ -176,6 +176,21 @@ class PostgresMarketDataRepositoryTestCase(unittest.TestCase):
         self.repository = object.__new__(PostgresMarketDataRepository)
         self.repository._connect = lambda: self.connection
 
+    def test_adjustment_version_prefix_escapes_sql_wildcard_for_psycopg(self) -> None:
+        self.cursor._rows = [("v1:checksum",)]
+        self.cursor.description = [SimpleNamespace(name="adjustment_version")]
+
+        resolved = self.repository.resolve_adjustment_version(
+            "INE000000001", date(2026, 9, 11), "v1"
+        )
+
+        statement, parameters = self.cursor.executed[0]
+        self.assertEqual("v1:checksum", resolved)
+        self.assertIn("LIKE %s::text || ':%%'", statement)
+        self.assertEqual(
+            ("INE000000001", date(2026, 9, 11), "v1", "v1", "v1"), parameters
+        )
+
     def test_upsert_raw_bars_uses_natural_key_and_increments_revision(self) -> None:
         count = self.repository.upsert_raw_bars([
             {

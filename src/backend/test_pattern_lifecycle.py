@@ -190,6 +190,28 @@ class LifecycleTestCase(unittest.TestCase):
         self.assertNotEqual(old.instance["id"], replacement.instance["id"])
         self.assertEqual("adjusted-v2", replacement.instance["adjustment_version"])
 
+    def test_lineage_reconciliation_invalidates_superseded_engine_result(self):
+        old = self._apply(_candidate(PatternState.READY))
+
+        invalidated = self.service.invalidate_lineage_mismatches(
+            _ISIN,
+            date(2026, 9, 2),
+            engine_version="v2",
+            feature_version="features-v1",
+            adjustment_version="adjusted-v1",
+        )
+
+        self.assertEqual(1, len(invalidated))
+        self.assertEqual(old.instance["id"], invalidated[0].instance["id"])
+        self.assertEqual(PatternState.INVALIDATED.value, invalidated[0].instance["state"])
+        self.assertEqual(
+            "ENGINE_VERSION_CHANGED",
+            invalidated[0].instance["measurements"]["invalidation_reason"],
+        )
+        self.assertEqual(
+            "v2", invalidated[0].instance["measurements"]["replacement_engine_version"]
+        )
+
     def test_confirmed_candidate_preserves_breakout_trigger_date(self):
         breakout_date = date(2026, 8, 29)
         candidate = replace(
@@ -204,6 +226,85 @@ class LifecycleTestCase(unittest.TestCase):
 
         self.assertEqual(breakout_date, created.instance["trigger_date"])
         self.assertEqual(candidate.detected_date, created.instance["confirmation_date"])
+
+    def test_unconfirmed_breakout_expires_after_failure_window(self):
+        start = date(2026, 8, 1)
+        trading_dates = [start + timedelta(days=index) for index in range(20)]
+        candidate = replace(
+            _candidate(
+                PatternState.TRIGGERED,
+                detected=trading_dates[5],
+                start=trading_dates[0],
+                pattern_type="BRK-RANGE",
+                pattern_class=PatternClass.BREAKOUT,
+            ),
+            measurements={"breakout_date": trading_dates[5]},
+        )
+        created = self._apply(candidate)
+
+        expired = self.service.expire_stale(
+            _ISIN, trading_dates[11], trading_dates
+        )
+
+        self.assertEqual(1, len(expired))
+        self.assertEqual(created.instance["id"], expired[0].instance["id"])
+        self.assertEqual(PatternState.EXPIRED.value, expired[0].instance["state"])
+
+    def test_confirmed_breakout_expires_after_retest_window(self):
+        start = date(2026, 7, 1)
+        trading_dates = [start + timedelta(days=index) for index in range(40)]
+        candidate = replace(
+            _candidate(
+                PatternState.CONFIRMED,
+                detected=trading_dates[1],
+                start=trading_dates[0],
+                pattern_type="BRK-RANGE",
+                pattern_class=PatternClass.BREAKOUT,
+            ),
+            measurements={"breakout_date": trading_dates[1]},
+        )
+        created = self._apply(candidate)
+
+        expired = self.service.expire_stale(
+            _ISIN, trading_dates[32], trading_dates, observed_pattern_ids=()
+        )
+
+        self.assertEqual(1, len(expired))
+        self.assertEqual(created.instance["id"], expired[0].instance["id"])
+        self.assertEqual(PatternState.EXPIRED.value, expired[0].instance["state"])
+
+    def test_completed_scan_reconciles_absent_patterns_by_family(self):
+        observed = self._apply(_candidate(
+            PatternState.DETECTED, pattern_type="TREND-S2", pattern_class=PatternClass.TREND
+        ))
+        momentum = self._apply(_candidate(
+            PatternState.DETECTED, pattern_type="MOM-ACC", pattern_class=PatternClass.MOMENTUM
+        ))
+        base = self._apply(_candidate(PatternState.READY))
+        breakout = self._apply(_candidate(
+            PatternState.CONFIRMED,
+            pattern_type="BRK-RANGE",
+            pattern_class=PatternClass.BREAKOUT,
+        ))
+        weekly = self._apply(replace(
+            _candidate(
+                PatternState.READY,
+                pattern_type="REV-DBOT",
+                pattern_class=PatternClass.REVERSAL,
+            ),
+            timeframe="1W",
+        ))
+
+        reconciled = self.service.reconcile_unobserved(
+            _ISIN, date(2026, 9, 2), (observed.instance["id"],), ("1D",)
+        )
+
+        by_id = {item.instance["id"]: item for item in reconciled}
+        self.assertEqual(PatternState.EXPIRED.value, by_id[momentum.instance["id"]].instance["state"])
+        self.assertEqual(PatternState.INVALIDATED.value, by_id[base.instance["id"]].instance["state"])
+        self.assertNotIn(breakout.instance["id"], by_id)
+        self.assertNotIn(weekly.instance["id"], by_id)
+        self.assertIsNone(self.repository.instances[observed.instance["id"]]["terminal_date"])
 
     def test_stale_base_and_each_pullback_family_expire_by_trading_sessions(self):
         start = date(2026, 1, 1)

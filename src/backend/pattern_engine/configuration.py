@@ -34,6 +34,8 @@ REQUIRED_SECTIONS = frozenset(
         "momentum",
         "volume",
         "failure",
+        "reversal",
+        "harmonic",
         "quality_weights",
         "maturity_weights",
         "context_weights",

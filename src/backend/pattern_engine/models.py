@@ -234,6 +234,10 @@ class PatternCandidate:
     measurements: Mapping[str, SerializableValue]
     supporting_pattern_identifiers: tuple[str, ...]
     invalidation_rule: str | None
+    timeframe: str = '1D'
+    pattern_group: str = 'SETUP'
+    direction: str = 'NEUTRAL'
+    interval_complete: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "measurements", _freeze_value(self.measurements))
@@ -273,6 +277,10 @@ class PatternInstance:
     supporting_pattern_identifiers: tuple[str, ...] = ()
     adjustment_version: str = ""
     feature_version: str = ""
+    timeframe: str = '1D'
+    pattern_group: str = 'SETUP'
+    direction: str = 'NEUTRAL'
+    interval_complete: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "measurements", _freeze_value(self.measurements))
