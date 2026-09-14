@@ -112,6 +112,19 @@ class PatternEngineRunnerTestCase(unittest.TestCase):
             patch("pattern_engine.runner.detect_failures", return_value=[]),
         )
 
+    def test_index_scan_does_not_require_equity_volume_fields(self):
+        runner = self._runner(FakeDataSource())
+        as_of = date(2026, 9, 5)
+        bars = [{"trading_date": as_of, "close_price": _D("100")} for _ in range(200)]
+        features = [{"trading_date": as_of, "median_traded_value_20": _D("0"), "median_volume_20": _D("0")}]
+
+        decisions = runner._eligibility_decisions(
+            bars, features, as_of, {"instrumentType": "INDEX"}
+        )
+
+        self.assertNotIn("median_traded_value_20", {item["rule"] for item in decisions})
+        self.assertNotIn("median_volume_20", {item["rule"] for item in decisions})
+
     def test_dry_run_reports_stage_decisions_and_scores_without_live_writes(self):
         as_of = date(2026, 9, 5)
         calls = []

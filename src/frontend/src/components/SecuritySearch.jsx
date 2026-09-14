@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { searchSecurities } from '../api/securityApi.js'
+import { addToWatchlist, getWatchlist } from '../api/watchlistApi.js'
 import { buildSecurityPath } from '../routing/routes.js'
 
-export default function SecuritySearch({ onNavigate, onUnauthorized }) {
+export default function SecuritySearch({ onNavigate, onUnauthorized, onWatchlistChanged }) {
   const listId = useId()
   const input = useRef(null)
   const [query, setQuery] = useState('')
@@ -10,9 +11,33 @@ export default function SecuritySearch({ onNavigate, onUnauthorized }) {
   const [activeIndex, setActiveIndex] = useState(-1)
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
+  const [watchlisted, setWatchlisted] = useState(() => new Set())
+  const [adding, setAdding] = useState('')
+  const [watchlistMessage, setWatchlistMessage] = useState('')
   const choose = (security) => {
     setQuery(''); setResults([]); setActiveIndex(-1); setMessage('')
     onNavigate(buildSecurityPath(security.isin))
+  }
+  useEffect(() => {
+    const controller = new AbortController()
+    getWatchlist({ signal: controller.signal, onUnauthorized })
+      .then((payload) => setWatchlisted(new Set((payload.items || []).map((item) => item.security.isin))))
+      .catch((error) => { if (error.name !== 'AbortError') setWatchlistMessage('Watchlist status is temporarily unavailable.') })
+    return () => controller.abort()
+  }, [onUnauthorized])
+  const add = async (security) => {
+    setAdding(security.isin)
+    setWatchlistMessage('')
+    try {
+      const result = await addToWatchlist(security.isin, { onUnauthorized })
+      setWatchlisted((current) => new Set([...current, security.isin]))
+      setWatchlistMessage(`${security.symbol || security.name} added to your watchlist.`)
+      if (result.added) onWatchlistChanged?.({ action: 'added', isin: security.isin })
+    } catch (error) {
+      setWatchlistMessage(error.message || 'Could not add this stock to your watchlist.')
+    } finally {
+      setAdding('')
+    }
   }
   useEffect(() => {
     const value = query.trim()
@@ -36,5 +61,5 @@ export default function SecuritySearch({ onNavigate, onUnauthorized }) {
     else if (event.key === 'Enter' && activeIndex >= 0) { event.preventDefault(); choose(results[activeIndex]) }
     else if (event.key === 'Escape') { setResults([]); setActiveIndex(-1); setMessage(''); input.current?.focus() }
   }
-  return <div className="security-jump"><label htmlFor={`${listId}-input`}>Search equities by name or symbol</label><div className="security-search-control"><svg className="security-search-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg><input ref={input} id={`${listId}-input`} role="combobox" aria-autocomplete="list" aria-controls={listId} aria-expanded={results.length > 0} aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={keyDown} placeholder="Search by company or symbol" autoComplete="off" /><span className="security-search-hint" aria-hidden="true">Equities</span></div>{(status === 'loading' || results.length > 0 || message) && <div id={listId} className="security-search-popover" role="listbox" aria-label="Matching equities">{status === 'loading' && <p>Searching equities…</p>}{results.map((security, index) => <button id={`${listId}-${index}`} type="button" role="option" aria-selected={index === activeIndex} key={security.isin} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(security)}><strong>{security.symbol}</strong><span>{security.name}</span>{security.sectorName && <small>{security.sectorName}</small>}</button>)}{message && status !== 'loading' && <p className="visually-hidden" role="status">{message}</p>}{status === 'error' && <p>{message}</p>}</div>}</div>
+  return <div className="security-jump"><label htmlFor={`${listId}-input`}>Search equities by name or symbol</label><div className="security-search-control"><svg className="security-search-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg><input ref={input} id={`${listId}-input`} role="combobox" aria-autocomplete="list" aria-controls={listId} aria-expanded={results.length > 0} aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={keyDown} placeholder="Search by company or symbol" autoComplete="off" /><span className="security-search-hint" aria-hidden="true">Equities</span></div>{(status === 'loading' || results.length > 0 || message) && <div id={listId} className="security-search-popover" role="listbox" aria-label="Matching equities">{status === 'loading' && <p>Searching equities…</p>}{results.map((security, index) => { const saved = watchlisted.has(security.isin); return <div className="security-search-result" key={security.isin}><button className="security-result-button" id={`${listId}-${index}`} type="button" role="option" aria-selected={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(security)}><strong>{security.symbol}</strong><span>{security.name}</span>{security.sectorName && <small>{security.sectorName}</small>}</button><button className="watchlist-search-button" type="button" disabled={saved || adding === security.isin} onClick={() => add(security)} aria-label={`${saved ? 'In watchlist' : 'Add to watchlist'}: ${security.symbol || security.name}`}><span aria-hidden="true">{saved ? '✓' : '+'}</span>{adding === security.isin ? 'Adding…' : saved ? 'Saved' : 'Add'}</button></div> })}{message && status !== 'loading' && <p className="visually-hidden" role="status">{message}</p>}{watchlistMessage && <p className="security-search-message" role="status">{watchlistMessage}</p>}{status === 'error' && <p>{message}</p>}</div>}</div>
 }

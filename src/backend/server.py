@@ -14,6 +14,9 @@ from repositories.patterns import InMemoryPatternRepository, PostgresPatternRepo
 from repositories.research import InMemoryResearchRepository, PostgresResearchRepository
 from repositories.admin_pipeline import PostgresAdminPipelineRepository
 from repositories.operations import PostgresOperationsRepository
+from repositories.watchlists import InMemoryWatchlistRepository, PostgresWatchlistRepository
+from repositories.indices import InMemoryIndexRepository, PostgresIndexRepository
+from repositories.case_studies import InMemoryCaseStudyRepository, PostgresCaseStudyRepository
 from data_pipeline.history_backfill import HistoryBackfillService
 from data_pipeline.benchmark_history import BenchmarkHistoryService
 from data_pipeline.nse_data_collector import NseDataCollector
@@ -26,7 +29,11 @@ from operations.recovery import RecoveryService
 from pattern_engine.configuration import load_pattern_engine_configuration
 from pattern_engine.query_service import PatternQueryService
 from pattern_engine.research import BacktestService, PatternReplayEvaluator
-from pattern_engine.runner import PatternEngineRunner
+from pattern_engine.case_study_service import CaseStudyService
+from operations.case_study_pipeline import CaseStudyPipeline
+from pattern_engine.runner import PatternEngineRunner, PatternEngineVersions
+from watchlist.service import WatchlistService
+from indices.service import IndexPipelineService, IndexQueryService
 from server_http.api import ApiHandler
 
 HOST = "127.0.0.1"
@@ -82,7 +89,7 @@ def _startup_integer(name: str, default: int, minimum: int, maximum: int) -> int
     return value
 
 
-def create_server(host: str = HOST, port: int = PORT, repository: UserRepository | None = None, pattern_repository=None, research_repository=None, replay_evaluator=None, admin_pipeline_service=None) -> ThreadingHTTPServer:
+def create_server(host: str = HOST, port: int = PORT, repository: UserRepository | None = None, pattern_repository=None, research_repository=None, replay_evaluator=None, admin_pipeline_service=None, watchlist_repository=None, case_study_repository=None) -> ThreadingHTTPServer:
     use_configured_database = repository is None
     dsn = os.getenv("DATABASE_URL")
     repository = repository or build_repository()
@@ -90,6 +97,11 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
     if pattern_repository is None:
         pattern_repository = PostgresPatternQueryRepository(dsn) if dsn and use_configured_database else InMemoryPatternQueryRepository()
     pattern_service = PatternQueryService(pattern_repository)
+    if watchlist_repository is None:
+        watchlist_repository = PostgresWatchlistRepository(dsn) if dsn and use_configured_database else InMemoryWatchlistRepository()
+    watchlist_service = WatchlistService(watchlist_repository)
+    index_repository = PostgresIndexRepository(dsn) if dsn and use_configured_database else InMemoryIndexRepository()
+    index_query_service = IndexQueryService(index_repository)
     if research_repository is None:
         research_repository = PostgresResearchRepository(dsn, apply_migrations=False) if dsn and use_configured_database else InMemoryResearchRepository()
     configuration_version = None
@@ -106,12 +118,32 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
         research_repository, replay_evaluator,
         configuration_version=configuration_version,
     )
+    case_study_repository = case_study_repository or (PostgresCaseStudyRepository(dsn) if dsn and use_configured_database else InMemoryCaseStudyRepository())
+    case_study_service = CaseStudyService(case_study_repository)
+    case_study_versions = None
+    if configuration is not None:
+        case_study_versions = PatternEngineVersions(
+            configuration.version,
+            configuration.version,
+            str(configuration.section("adjustments")["methodology_version"]),
+        )
+    case_study_pipeline = CaseStudyPipeline(
+        case_study_repository,
+        research_service,
+        versions=case_study_versions,
+        configuration_version=configuration_version,
+    )
     if admin_pipeline_service is None and dsn and use_configured_database:
         operations_repository = PostgresOperationsRepository(dsn, apply_migrations=False)
         event_logger = StructuredEventLogger(operations_repository)
         nse_client = NseApiClient()
         admin_pipeline_repository = PostgresAdminPipelineRepository(dsn, apply_migrations=False)
         equity_repository = PostgresEquityRepository(dsn, apply_migrations=False)
+        index_pipeline = IndexPipelineService(
+            index_repository, market_repository, nse_client,
+            RecoveryService(market_repository, runner, configuration, logger=event_logger),
+            configuration,
+        )
         admin_pipeline_service = AdminPipelineService(
             admin_pipeline_repository,
             HistoryBackfillService(market_repository, nse_client, event_logger=event_logger),
@@ -128,6 +160,8 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
                 equity_repository, nse_client, run_repository=market_repository
             ),
             sector_repository=market_repository,
+            quadrant_tracker=watchlist_repository.reconcile_quadrants,
+            index_pipeline=index_pipeline,
         )
         admin_pipeline_service.recover_interrupted_runs()
     admin_pipeline_service = admin_pipeline_service or DisabledAdminPipelineService()
@@ -138,7 +172,11 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
     ConfiguredApiHandler.service = service
     ConfiguredApiHandler.pattern_service = pattern_service
     ConfiguredApiHandler.research_service = research_service
+    ConfiguredApiHandler.watchlist_service = watchlist_service
+    ConfiguredApiHandler.index_query_service = index_query_service
     ConfiguredApiHandler.admin_pipeline_service = admin_pipeline_service
+    ConfiguredApiHandler.case_study_service = case_study_service
+    ConfiguredApiHandler.case_study_pipeline = case_study_pipeline
     return ThreadingHTTPServer((host, port), ConfiguredApiHandler)
 
 

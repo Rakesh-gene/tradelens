@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -28,6 +29,7 @@ class ResearchRepository(Protocol):
     def update_run(self, run_id: str, status: str, **values) -> None: ...
     def list_trading_sessions(self, from_date: date, to_date: date, adjustment_version: str) -> list[date]: ...
     def list_historical_universe(self, index_code: str, as_of_date: date) -> list[dict[str, object]]: ...
+    def list_historical_security(self, isin: str, as_of_date: date) -> list[dict[str, object]]: ...
     def load_outcome_bars(self, isin: str, entry_date: date, adjustment_version: str, limit: int) -> list[dict[str, object]]: ...
     def insert_entry_with_outcome(self, run_id: str, entry: Mapping[str, object], outcome: Mapping[str, object]) -> str: ...
     def get_run(self, run_id: str) -> dict[str, object] | None: ...
@@ -53,7 +55,8 @@ class PatternReplayEvaluator:
 class BacktestRequest:
     from_date: date
     to_date: date
-    index_code: str
+    index_code: str | None
+    isin: str | None
     filters: Mapping[str, object]
     versions: PatternEngineVersions
     configuration_version: str
@@ -76,7 +79,11 @@ class BacktestService:
         run_id = self._repository.create_run({
             "requested_from_date": request.from_date,
             "requested_to_date": request.to_date,
-            "universe": {"indexCode": request.index_code, "membershipPolicy": "effective-dated"},
+            "universe": (
+                {"isin": request.isin, "selectionPolicy": "explicit-security"}
+                if request.isin else
+                {"indexCode": request.index_code, "membershipPolicy": "effective-dated"}
+            ),
             "filters": request.filters,
             "engine_version": request.versions.engine,
             "configuration_version": request.configuration_version,
@@ -102,7 +109,12 @@ class BacktestService:
             )
             for session in sessions:
                 sessions_processed += 1
-                for security in self._repository.list_historical_universe(request.index_code, session):
+                securities = (
+                    self._repository.list_historical_security(request.isin, session)
+                    if request.isin else
+                    self._repository.list_historical_universe(request.index_code, session)
+                )
+                for security in securities:
                     securities_evaluated += 1
                     for explanation in self._evaluator.evaluate(security, session, request.versions):
                         candidate = explanation.get("candidate") or {}
@@ -247,15 +259,19 @@ def _request(payload):
     from_date, to_date = _date_value(payload.get("fromDate"), "fromDate"), _date_value(payload.get("toDate"), "toDate")
     if from_date > to_date: raise ValueError("fromDate cannot be after toDate")
     universe = payload.get("universe") or {}
-    index_code = str(universe.get("indexCode") or "").strip()
-    if not index_code: raise ValueError("universe.indexCode is required for point-in-time membership")
+    index_code = str(universe.get("indexCode") or "").strip() or None
+    isin = str(universe.get("isin") or "").strip().upper() or None
+    if bool(index_code) == bool(isin):
+        raise ValueError("universe must contain exactly one of indexCode or isin")
+    if isin and not re.fullmatch(r"[A-Z0-9]{12}", isin):
+        raise ValueError("universe.isin must be a valid 12-character ISIN")
     versions = payload.get("versions") or {}
     engine, feature, adjustment = (str(versions.get(name) or "").strip() for name in ("engine", "feature", "adjustment"))
     if not all((engine, feature, adjustment)): raise ValueError("engine, feature, and adjustment versions are required")
     configuration = str(versions.get("configuration") or "").strip()
     if not configuration: raise ValueError("configuration version is required")
     minimum = _bounded_int(payload.get("minimumSampleSize"), 30, 1, 10000, "minimumSampleSize")
-    return BacktestRequest(from_date, to_date, index_code, _validated_filters(payload.get("filters") or {}), PatternEngineVersions(engine, feature, adjustment), configuration, minimum)
+    return BacktestRequest(from_date, to_date, index_code, isin, _validated_filters(payload.get("filters") or {}), PatternEngineVersions(engine, feature, adjustment), configuration, minimum)
 
 
 def _matches(candidate, explanation, security, filters):

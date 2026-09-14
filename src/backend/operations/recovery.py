@@ -23,13 +23,14 @@ class RecoveryService:
 
     def rebuild_security(
         self, isin, from_date, to_date, versions, *, dry_run=False,
-        timeframes=('1D',),
+        timeframes=('1D',), instrument_type='EQUITY',
     ):
         if from_date > to_date: raise ValueError("from_date cannot be after to_date")
         if dry_run:
             return {"isin": isin, "fromDate": from_date, "toDate": to_date, "versions": versions, "dryRun": True}
         prepared = self.prepare_security(isin, from_date, to_date, versions)
         prepared['timeframes'] = tuple(timeframes)
+        prepared['instrumentType'] = instrument_type
         return self.scan_prepared_security(prepared)
 
     def prepare_security(self, isin, from_date, to_date, versions):
@@ -90,6 +91,8 @@ class RecoveryService:
         timeframes = tuple(prepared.get('timeframes') or ('1D',))
         if timeframes != ('1D',):
             run_options['timeframes'] = timeframes
+        if prepared.get("instrumentType") == "INDEX":
+            run_options["security"] = {"isin": isin, "instrumentType": "INDEX"}
         report = self._runner.run_security(
             isin, effective_to_date, prepared["versions"], **run_options,
         )

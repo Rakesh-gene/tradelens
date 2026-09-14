@@ -4,7 +4,7 @@ import SecuritySearch from './SecuritySearch.jsx'
 import SiteFooter from './SiteFooter.jsx'
 import LoginDisclaimer from './LoginDisclaimer.jsx'
 
-export default function AppShell({ children, user, onNavigate, onSignOut, showLoginDisclaimer, onDismissLoginDisclaimer }) {
+export default function AppShell({ children, user, onNavigate, onSignOut, onWatchlistChanged, showLoginDisclaimer, onDismissLoginDisclaimer }) {
   const accountInitial = user?.email?.trim()?.charAt(0).toUpperCase() || 'U'
   return <div className="product-shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
@@ -14,9 +14,13 @@ export default function AppShell({ children, user, onNavigate, onSignOut, showLo
         <NavigationLink to="/overview" onNavigate={onNavigate}>Overview</NavigationLink>
         <NavigationLink to="/sector-rotation" onNavigate={onNavigate}>Sector rotation</NavigationLink>
         <NavigationLink to="/setups" onNavigate={onNavigate}>Setups</NavigationLink>
+        <NavigationLink to="/case-studies" onNavigate={onNavigate}>Case studies</NavigationLink>
+        <NavigationLink to="/watchlist" onNavigate={onNavigate}>Watchlist</NavigationLink>
+        <NavigationLink to="/indices" onNavigate={onNavigate}>Indices</NavigationLink>
         {(user?.isAdmin || user?.is_admin) && <NavigationLink to="/admin/pipeline" onNavigate={onNavigate}>Pipeline</NavigationLink>}
+        {(user?.isAdmin || user?.is_admin) && <NavigationLink to="/admin/case-studies" onNavigate={onNavigate}>Case build</NavigationLink>}
       </nav>
-      <SecuritySearch onNavigate={onNavigate} onUnauthorized={onSignOut} />
+      <SecuritySearch onNavigate={onNavigate} onUnauthorized={onSignOut} onWatchlistChanged={onWatchlistChanged} />
       <div className="user-menu">
         <NavigationLink className="account-button" to="/profile" onNavigate={onNavigate} aria-label={`Open profile for ${user?.email || 'current user'}`}>
           <span className="account-avatar" aria-hidden="true">{accountInitial}</span>

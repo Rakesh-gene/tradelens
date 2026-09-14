@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError, apiRequest } from '../src/api/apiClient.js'
+import { getIndices } from '../src/api/indicesApi.js'
 
 test('encodes query values and sends JSON headers only when needed', async (context) => {
   const originalFetch = globalThis.fetch
@@ -38,4 +39,27 @@ test('rejects non-JSON and non-API responses predictably', async (context) => {
   globalThis.fetch = async () => new Response('<html>proxy error</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })
   await assert.rejects(apiRequest('/api/overview'), (error) => error.code === 'INVALID_RESPONSE' && error.status === 502)
   await assert.rejects(apiRequest('https://example.com/api/data'), TypeError)
+})
+
+test('index requests attach the saved access token', async (context) => {
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  context.after(() => {
+    globalThis.fetch = originalFetch
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  })
+  globalThis.window = { sessionStorage: { getItem: () => 'saved-token' } }
+  let request
+  globalThis.fetch = async (path, options) => {
+    request = { path, options }
+    return new Response(JSON.stringify({ count: 0, items: [] }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  await getIndices()
+
+  assert.equal(request.path, '/api/indices')
+  assert.equal(request.options.headers.Authorization, 'Bearer saved-token')
 })

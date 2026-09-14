@@ -16,6 +16,7 @@ import useDocumentTitle from '../hooks/useDocumentTitle.js'
 import NavigationLink from '../components/NavigationLink.jsx'
 import { buildPatternPath } from '../routing/routes.js'
 import DecisionSummary from '../components/DecisionSummary.jsx'
+import WatchlistButton from '../components/WatchlistButton.jsx'
 
 function SupportingEvidence({ title, items }) {
   return <article className="evidence-card">
@@ -71,10 +72,12 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
       }
       return <>
         <PageIntro
+          eyebrow="Stock overview"
           title={fingerprint.security.symbol || fingerprint.security.isin}
-          description={`${fingerprint.security.name || 'NSE security'}${fingerprint.security.sectorName ? ` - ${fingerprint.security.sectorName}` : ''}`}
+          description={`${fingerprint.security.name || 'NSE security'}${fingerprint.security.sectorName ? ` · ${fingerprint.security.sectorName}` : ''}. Review its trend, price levels, relative strength, and active patterns.`}
           date={fingerprint.dataAsOf}
         />
+        <WatchlistButton isin={isin} onUnauthorized={onUnauthorized} />
 
         {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>Current operating view</h2></div><StateBadge state={primary.state} /></div><DecisionSummary decision={primary.decision} /></section>}
 

@@ -336,6 +336,9 @@ canonical type/variant split; do not create near-duplicate type names.
   completeness, and outcomes so a result is reproducible.
 - Standard outcomes include 5/10/20/40/60-session returns, MFE, MAE,
   days-to-threshold, and hit-before-loss measures from the specification.
+- Positional case studies additionally center adjusted forward stock performance
+  at 63, 126, and 252 trading sessions (approximately 3M, 6M, and 1Y) from the
+  next-session adjusted open; hypothetical trade P/L remains secondary lineage.
 - Do not show probability-like claims for inadequate samples. Never derive
   historical probability from setup score.
 

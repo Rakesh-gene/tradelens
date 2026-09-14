@@ -6,6 +6,14 @@ test('matches static and valid dynamic routes', () => {
   assert.equal(matchRoute('/overview/').name, 'overview')
   assert.equal(matchRoute('/sector-rotation/').name, 'sector-rotation')
   assert.equal(matchRoute('/profile').name, 'profile')
+  assert.equal(matchRoute('/watchlist').name, 'watchlist')
+  assert.equal(matchRoute('/indices').name, 'indices')
+  assert.equal(matchRoute('/indices').entitlement, 'indices')
+  assert.equal(matchRoute('/case-studies').name, 'case-studies')
+  assert.equal(matchRoute('/admin/case-studies').name, 'admin-case-studies')
+  assert.deepEqual(matchRoute('/case-studies/2a9ca55f-3d2d-4b25-b683-36979029fb97').params, {
+    caseStudyId: '2a9ca55f-3d2d-4b25-b683-36979029fb97',
+  })
   assert.deepEqual(matchRoute('/patterns/2a9ca55f-3d2d-4b25-b683-36979029fb97').params, {
     patternId: '2a9ca55f-3d2d-4b25-b683-36979029fb97',
   })
@@ -18,6 +26,7 @@ test('rejects malformed identifiers locally', () => {
   assert.equal(matchRoute('/missing').name, 'not-found')
   assert.equal(matchRoute('/research').name, 'not-found')
   assert.equal(matchRoute('/research/2a9ca55f-3d2d-4b25-b683-36979029fb97').name, 'not-found')
+  assert.equal(matchRoute('/case-studies/not-a-uuid').name, 'not-found')
 })
 
 test('builds encoded, validated dynamic paths', () => {

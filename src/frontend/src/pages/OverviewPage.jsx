@@ -11,7 +11,7 @@ export default function OverviewPage({ onNavigate, onUnauthorized }) {
   useDocumentTitle('Overview')
   const resource = useApiResource('overview', (signal) => getOverview({ top: 6 }, { signal, onUnauthorized }))
   return <>
-    <PageIntro title="Market overview" date={resource.data?.dataAsOf} />
+    <PageIntro eyebrow="Today’s market" title="Market overview" description="See market direction, breadth, and the strongest active setups at a glance." date={resource.data?.dataAsOf} />
     <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
     {resource.data && <>
       <section className="market-grid" aria-label="Market regime and lifecycle"><MarketRegimeCard market={resource.data.market} /><div className="state-counts">{Object.entries(resource.data.countsByState).map(([state, count]) => <NavigationLink key={state} to={`/setups?state=${state}`} onNavigate={onNavigate}><span>{state}</span><strong>{count}</strong><small>View setups →</small></NavigationLink>)}</div></section>

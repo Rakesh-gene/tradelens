@@ -9,13 +9,18 @@ from urllib.parse import parse_qs, urlsplit
 from auth.service import AuthService
 from pattern_engine.query_service import PatternQueryService, browser_payload
 from pattern_engine.research import BacktestService
+from pattern_engine.case_study_service import CaseStudyService
 
 
 class ApiHandler(BaseHTTPRequestHandler):
     service: AuthService
     pattern_service: PatternQueryService
     research_service: BacktestService
+    watchlist_service: Any
+    index_query_service: Any
     admin_pipeline_service: Any
+    case_study_service: CaseStudyService
+    case_study_pipeline: Any
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(browser_payload(payload)).encode("utf-8")
@@ -63,12 +68,31 @@ class ApiHandler(BaseHTTPRequestHandler):
                 },
             })
             return
+        if path == "/api/watchlist":
+            try:
+                user = self.service.current_user(self._access_token())
+            except ValueError as exc:
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, self.watchlist_service.list(str(user["id"])))
+            return
         if path.startswith("/api/admin/"):
             user = self._authorize_admin()
             if user is None:
                 return
             try:
-                if path == "/api/admin/equities":
+                if path.startswith("/api/admin/case-study-runs/"):
+                    parts = path.strip("/").split("/")
+                    if len(parts) == 4:
+                        payload = self.case_study_pipeline.get(parts[3])
+                    elif len(parts) == 5 and parts[4] == "items":
+                        payload = self.case_study_pipeline.items(parts[3], query)
+                    else:
+                        self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+                        return
+                elif path == "/api/admin/case-studies":
+                    payload = self.case_study_service.review_queue(query)
+                elif path == "/api/admin/equities":
                     payload = self.admin_pipeline_service.list_equities(query)
                 elif path == "/api/admin/pipeline/runs":
                     payload = self.admin_pipeline_service.list_runs(query)
@@ -104,6 +128,30 @@ class ApiHandler(BaseHTTPRequestHandler):
             if payload is not None:
                 self._send_json(HTTPStatus.OK, payload)
                 return
+        if path == "/api/case-studies" or path == "/api/case-studies/facets" or path.startswith("/api/case-studies/"):
+            try:
+                self.service.current_user(self._access_token())
+                parts = path.strip("/").split("/")
+                if path == "/api/case-studies":
+                    payload = self.case_study_service.catalog(query)
+                elif path == "/api/case-studies/facets":
+                    payload = self.case_study_service.facets()
+                elif len(parts) == 3:
+                    payload = self.case_study_service.detail(parts[2])
+                elif len(parts) == 4 and parts[3] == "chart":
+                    payload = self.case_study_service.chart(parts[2], query)
+                else:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+                    return
+            except LookupError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            except (TypeError, ValueError) as exc:
+                status = HTTPStatus.UNAUTHORIZED if "token" in str(exc).lower() or "authorization" in str(exc).lower() else HTTPStatus.BAD_REQUEST
+                self._send_json(status, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, payload)
+            return
         if path == "/":
             self._send_json(
                 HTTPStatus.OK,
@@ -132,7 +180,7 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _is_pattern_path(path):
         if path == '/api/patterns':
             return True
-        if path in {"/api/overview", "/api/setups", "/api/securities/search", "/api/sectors/rotation", "/api/sectors/stocks"}:
+        if path in {"/api/overview", "/api/setups", "/api/securities/search", "/api/sectors/rotation", "/api/sectors/stocks", "/api/indices"}:
             return True
         parts = path.strip("/").split("/")
         return (
@@ -153,6 +201,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self.pattern_service.sector_stocks(query)
         if path == "/api/overview":
             return self.pattern_service.overview(query)
+        if path == "/api/indices":
+            return self.index_query_service.list()
         if path == "/api/setups":
             return self.pattern_service.setups(query)
         if path == "/api/securities/search":
@@ -177,6 +227,22 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
         parts = path.strip("/").split("/")
+        if path == "/api/watchlist":
+            try:
+                user = self.service.current_user(self._access_token())
+                result = self.watchlist_service.add(str(user["id"]), self._read_json().get("isin"))
+            except json.JSONDecodeError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            except LookupError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            except ValueError as exc:
+                status = HTTPStatus.UNAUTHORIZED if "token" in str(exc).lower() or "authorization" in str(exc).lower() else HTTPStatus.BAD_REQUEST
+                self._send_json(status, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.CREATED if result["added"] else HTTPStatus.OK, result)
+            return
         if len(parts) == 6 and parts[:4] == ["api", "admin", "pipeline", "runs"]:
             user = self._authorize_admin()
             if user is None:
@@ -236,6 +302,22 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.CREATED, result)
             return
+        if path == "/api/admin/case-study-runs" or (len(parts) == 5 and parts[:3] == ["api", "admin", "case-study-runs"] and parts[4] == "resume"):
+            user = self._authorize_admin()
+            if user is None: return
+            try:
+                result = self.case_study_pipeline.start(self._read_json(), str(user.get("id") or "")) if path.endswith("case-study-runs") else self.case_study_pipeline.resume(parts[3])
+            except (ValueError, json.JSONDecodeError) as exc: self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)}); return
+            except LookupError as exc: self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)}); return
+            except RuntimeError as exc: self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)}); return
+            self._send_json(HTTPStatus.ACCEPTED, result); return
+        if len(parts) == 5 and parts[:3] == ["api", "admin", "case-studies"] and parts[4] == "review":
+            user = self._authorize_admin()
+            if user is None: return
+            try: result = self.case_study_service.review(parts[3], self._read_json())
+            except (ValueError, json.JSONDecodeError) as exc: self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)}); return
+            except LookupError as exc: self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)}); return
+            self._send_json(HTTPStatus.OK, result); return
         if path not in {"/api/register", "/api/login"}:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
@@ -273,6 +355,21 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "user": {"id": registration.user_id, "email": registration.email},
             },
         )
+
+    def do_DELETE(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
+        parts = path.strip("/").split("/")
+        if len(parts) != 3 or parts[:2] != ["api", "watchlist"]:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            return
+        try:
+            user = self.service.current_user(self._access_token())
+            result = self.watchlist_service.remove(str(user["id"]), parts[2])
+        except ValueError as exc:
+            status = HTTPStatus.UNAUTHORIZED if "token" in str(exc).lower() or "authorization" in str(exc).lower() else HTTPStatus.BAD_REQUEST
+            self._send_json(status, {"error": str(exc)})
+            return
+        self._send_json(HTTPStatus.OK, result)
 
     def _authorize_admin(self):
         try:

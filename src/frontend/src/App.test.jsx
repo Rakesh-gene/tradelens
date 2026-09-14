@@ -11,6 +11,8 @@ vi.mock('./api/authApi.js', async (load) => {
 vi.mock('./pages/OverviewPage.jsx', () => ({ default: () => <h1>Overview fixture</h1> }))
 vi.mock('./pages/SectorRotationPage.jsx', () => ({ default: () => <h1>Sector rotation fixture</h1> }))
 vi.mock('./pages/SetupsPage.jsx', () => ({ default: () => <h1>Setups fixture</h1> }))
+vi.mock('./pages/WatchlistPage.jsx', () => ({ default: () => <h1>Watchlist fixture</h1> }))
+vi.mock('./pages/IndicesPage.jsx', () => ({ default: () => <h1>Indices fixture</h1> }))
 vi.mock('./pages/PatternDetailPage.jsx', () => ({ default: () => <h1>Pattern fixture</h1> }))
 vi.mock('./pages/SecurityPage.jsx', () => ({ default: () => <h1>Security fixture</h1> }))
 vi.mock('./pages/AdminPipelinePage.jsx', () => ({ default: () => <h1>Pipeline fixture</h1> }))
@@ -71,6 +73,22 @@ describe('App session routing', () => {
     render(<App />)
     expect(await screen.findByRole('heading', { name: 'Sector rotation fixture' })).toBeTruthy()
     expect(screen.queryByText('Overview fixture')).toBeNull()
+  })
+
+  it('opens the user watchlist as a protected page', async () => {
+    sessionStorage.setItem('tradelensAccessToken', 'test-token')
+    window.history.replaceState({}, '', '/watchlist')
+    getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com', isAdmin: false } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Watchlist fixture' })).toBeTruthy()
+  })
+
+  it('opens the index analysis as a protected future-entitlement page', async () => {
+    sessionStorage.setItem('tradelensAccessToken', 'test-token')
+    window.history.replaceState({}, '', '/indices')
+    getCurrentUser.mockResolvedValue({ user: { email: 'person@example.com', isAdmin: false } })
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Indices fixture' })).toBeTruthy()
   })
 
   it('renders malformed protected identifiers locally without loading a detail page', async () => {

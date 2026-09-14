@@ -21,6 +21,7 @@ class PatternQueryRepository(Protocol):
     def list_setups(self, filters, limit, offset): ...
     def setup_facets(self, as_of): ...
     def overview_summary(self, as_of): ...
+    def index_overview_rows(self, as_of, sessions): ...
     def latest_scan_run(self): ...
     def get_pattern(self, pattern_id): ...
     def list_events(self, pattern_id, limit, offset): ...
@@ -71,6 +72,7 @@ class PatternQueryService:
         rows = self._repository.list_setups(setup_filters, top, 0)[:top]
         run = self._repository.latest_scan_run()
         regime = _number(summary.get("regime_score"))
+        indices = _index_overview(self._repository.index_overview_rows(data_as_of, 63))
         return {
             "dataAsOf": _iso(data_as_of), "generatedAt": datetime.now(timezone.utc),
             "engineVersion": _latest_value(rows, "engine_version"),
@@ -91,6 +93,7 @@ class PatternQueryService:
                 "new52WeekHighs": int(summary.get("new_52_week_highs") or 0),
                 "new52WeekLows": 0, "breakouts": int(summary.get("breakouts") or 0),
                 "failedBreakouts": int(summary.get("failed_breakouts") or 0),
+                "indices": indices,
             },
             "countsByState": {
                 state: int(summary.get(f"{state.lower()}_count") or 0)
@@ -356,6 +359,25 @@ _ACTIVE_OPPORTUNITY_STATES = (
 
 def _default_filters(as_of):
     return {"as_of": as_of, "pattern_class": None, "pattern_type": None, "variant": None, "states": _ACTIVE_OPPORTUNITY_STATES, "sector": None, "min_setup_score": None, "max_setup_score": None, "min_rs6m": None, "min_liquidity_score": None, "sort": "bestFit", "direction": "desc", "timeframe": "1D", "pattern_group": "SETUP", "pattern_direction": None}
+
+
+def _index_overview(rows):
+    grouped = {"NIFTY 50": [], "NIFTY 500": []}
+    for row in rows:
+        if row.get("index_code") in grouped:
+            grouped[row["index_code"]].append(row)
+    result = []
+    for code in ("NIFTY 50", "NIFTY 500"):
+        points = sorted(grouped[code], key=lambda row: row["trading_date"])
+        first = _number(points[0].get("close_price")) if points else None
+        latest = _number(points[-1].get("close_price")) if points else None
+        change = None if first in (None, 0) or latest is None else (latest - first) / first * 100
+        result.append({
+            "code": code, "name": code, "dataAsOf": points[-1]["trading_date"] if points else None,
+            "lastClose": latest, "periodChangePct": change,
+            "series": [{"date": row["trading_date"], "close": _number(row.get("close_price"))} for row in points],
+        })
+    return result
 
 
 _CHART_WINDOW_DAYS = {"3m": 92, "6m": 184, "1y": 365, "5y": 1826, "10y": 3653}

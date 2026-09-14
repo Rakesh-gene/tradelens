@@ -164,7 +164,7 @@ class EquityCollector:
 
 
 class AdminPipelineServiceTestCase(unittest.TestCase):
-    def _service(self, failed=(), *, equity_collector=None):
+    def _service(self, failed=(), *, equity_collector=None, quadrant_tracker=None):
         self.repository = PipelineRepository()
         self.history = HistoryService(failed)
         self.recovery = RecoveryService()
@@ -174,6 +174,7 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
             today=lambda: date(2026, 9, 5),
             max_workers=1,
             equity_collector=equity_collector,
+            quadrant_tracker=quadrant_tracker,
         )
 
     def test_lists_paginated_equities_and_runs_every_stage_for_selected_rows(self):
@@ -200,6 +201,14 @@ class AdminPipelineServiceTestCase(unittest.TestCase):
         self.assertEqual(1, result["run"]["securitiesCompleted"])
         self.assertEqual(1, result["run"]["securitiesFailed"])
         self.assertEqual(["COMPLETED", "FAILED"], [item["status"] for item in result["run"]["items"]])
+
+    def test_completed_full_pipeline_reconciles_watchlist_quadrants(self):
+        calls = []
+        service = self._service(quadrant_tracker=lambda: calls.append("reconciled") or 2)
+
+        service.start({"isins": ["INE002A01018"], "toDate": "2026-09-05"}, "admin-1")
+
+        self.assertEqual(["reconciled"], calls)
 
     def test_pattern_discovery_is_a_separate_activity_and_skips_history_download(self):
         service = self._service()

@@ -111,7 +111,7 @@ export default function AdminPipelinePage({ onUnauthorized, onNavigate }) {
   }
 
   return <>
-    <PageIntro title="Pipeline" />
+    <PageIntro eyebrow="Data operations" title="Market data updates" description="Update stock history and pattern analysis, then follow each run from start to finish." />
     <section className="admin-run-controls" aria-labelledby="pipeline-controls-title">
       <div><h2 id="pipeline-controls-title">{selected.size} equities selected</h2></div>
       <label>Analysis history from<input type="date" value={fromDate} max={toDate} onChange={(event) => setFromDate(event.target.value)} /></label>

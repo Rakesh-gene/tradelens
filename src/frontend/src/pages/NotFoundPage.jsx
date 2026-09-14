@@ -7,6 +7,7 @@ export default function NotFoundPage({ onNavigate, withFooter = false }) {
     <main className="standalone-state" aria-labelledby="not-found-title">
       <p className="eyebrow">404</p>
       <h1 id="not-found-title">Page not found</h1>
+      <p>The page may have moved or the address may be incorrect.</p>
       <button className="primary-button" type="button" onClick={() => onNavigate('/overview')}>Return to overview</button>
     </main>
   )

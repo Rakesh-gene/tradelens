@@ -41,6 +41,12 @@ class PatternQueryServiceTestCase(unittest.TestCase):
             features=[{"isin": "INE000000001", "trading_date": _DATE, "close_price": Decimal("98"), "relative_strength_6m": Decimal("91"), "relative_strength_percentile": Decimal("94"), "ema_20": Decimal("95"), "sma_50": Decimal("90"), "sma_200": Decimal("80"), "median_volume_20": Decimal("1000"), "median_traded_value_20": Decimal("25000000")}],
             bars=[{"isin": "INE000000001", "adjustment_version": "av1", "trading_date": _DATE - timedelta(days=1), "open_price": Decimal("96"), "high_price": Decimal("100"), "low_price": Decimal("95"), "close_price": Decimal("98"), "volume": Decimal("1000")}],
             actions=[{"source_event_key": "action-1", "isin": "INE000000001", "action_type": "SPLIT", "ex_date": _DATE - timedelta(days=2), "raw_description": "Stock split"}],
+            index_bars=[
+                {"index_code": "NIFTY 50", "trading_date": _DATE - timedelta(days=2), "close_price": Decimal("24000")},
+                {"index_code": "NIFTY 50", "trading_date": _DATE, "close_price": Decimal("24600")},
+                {"index_code": "NIFTY 500", "trading_date": _DATE - timedelta(days=2), "close_price": Decimal("22000")},
+                {"index_code": "NIFTY 500", "trading_date": _DATE, "close_price": Decimal("21560")},
+            ],
             run={"status": "COMPLETED", "finished_at": datetime(2026, 9, 5, tzinfo=timezone.utc), "securities_completed": 1, "securities_failed": 0},
         )
         self.service = PatternQueryService(self.repository)
@@ -51,6 +57,9 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertEqual(1, len(payload["topSetups"]))
         self.assertEqual(70.0, payload["topSetups"][0]["setupScore"])
         self.assertEqual("EXAMPLE", payload["topSetups"][0]["security"]["symbol"])
+        self.assertEqual(["NIFTY 50", "NIFTY 500"], [index["code"] for index in payload["market"]["indices"]])
+        self.assertEqual(2.5, payload["market"]["indices"][0]["periodChangePct"])
+        self.assertEqual(-2.0, payload["market"]["indices"][1]["periodChangePct"])
 
     def test_setups_validates_filters_and_uses_repeated_states(self):
         payload = self.service.setups({"asOf": [_DATE.isoformat()], "state": ["READY", "CONFIRMED"], "minSetupScore": ["80"], "pageSize": ["10"]})

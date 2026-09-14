@@ -86,7 +86,7 @@ export default function SetupsPage({ onNavigate, onUnauthorized }) {
   const nextBatchCount = Math.min(25, remainingCount)
 
   return <>
-    <PageIntro title="Setups" date={resource.data?.dataAsOf || parsed.filters.asOf} />
+    <PageIntro eyebrow="Active patterns" title="Setups" description="Explore positional setups and open any result to understand the price levels and signals behind it." date={resource.data?.dataAsOf || parsed.filters.asOf} />
     {parsed.corrected.length > 0 && <p className="status-banner" role="status">Unsupported {parsed.corrected.join(', ')} filters were removed.</p>}
     {compact ? <><button className="secondary-button filter-open" type="button" onClick={() => setDrawerOpen(true)}>Filters and sorting</button><PatternFilters drawer open={drawerOpen} filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} onClose={() => setDrawerOpen(false)} /></> : <PatternFilters filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} />}
     <p className="ranking-note">Scores rank setups within the same lifecycle state; they do not predict returns.</p>

@@ -1,0 +1,1 @@
+"""User watchlist domain."""

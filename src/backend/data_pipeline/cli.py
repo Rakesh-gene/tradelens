@@ -19,6 +19,12 @@ from repositories.market_data import PostgresMarketDataRepository
 from repositories.operations import PostgresOperationsRepository
 from operations.monitoring import StructuredEventLogger
 from server import load_local_environment
+from indices.service import IndexPipelineService
+from repositories.indices import PostgresIndexRepository
+from repositories.patterns import PostgresPatternRepository
+from operations.recovery import RecoveryService
+from pattern_engine.configuration import load_pattern_engine_configuration
+from pattern_engine.runner import PatternEngineRunner
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -57,6 +63,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     contract.add_argument("--to-date", type=_parse_date, default=date(2024, 1, 5))
     contract.add_argument("--actions-from", type=_parse_date, default=date(2024, 7, 1))
     contract.add_argument("--actions-to", type=_parse_date, default=date(2024, 11, 30))
+    indices = subparsers.add_parser("sync-indices", help="Import and scan the configured NSE index universe")
+    indices.add_argument("--from-date", type=_parse_date)
+    indices.add_argument("--to-date", type=_parse_date)
+    indices.add_argument("--years", type=int, default=10)
+    indices.add_argument("--index", action="append", dest="indices", default=[])
     arguments = parser.parse_args(argv)
 
     if arguments.command == "backfill-history":
@@ -67,6 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _sync_classifications(arguments)
     if arguments.command == "verify-nse-contract":
         return _verify_nse_contract(arguments)
+    if arguments.command == "sync-indices":
+        return _sync_indices(arguments)
     parser.error("Unsupported command")
     return 2
 
@@ -222,6 +235,29 @@ def _verify_nse_contract(arguments: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, indent=2))
     return 0 if history else 1
+
+
+def _sync_indices(arguments: argparse.Namespace) -> int:
+    if arguments.years <= 0:
+        raise SystemExit("--years must be positive")
+    load_local_environment()
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise SystemExit("DATABASE_URL is required for index imports")
+    to_date = arguments.to_date or date.today()
+    from_date = arguments.from_date or _years_before(to_date, arguments.years)
+    configuration = load_pattern_engine_configuration()
+    market = PostgresMarketDataRepository(dsn)
+    runner = PatternEngineRunner(
+        market, PostgresPatternRepository(dsn, apply_migrations=False), market, configuration
+    )
+    service = IndexPipelineService(
+        PostgresIndexRepository(dsn), market, NseApiClient(),
+        RecoveryService(market, runner, configuration), configuration,
+    )
+    result = service.run(from_date, to_date, initiated_by="manual", codes=arguments.indices)
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] in {"COMPLETED", "PARTIAL"} else 1
 
 
 if __name__ == "__main__":

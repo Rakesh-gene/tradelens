@@ -459,7 +459,25 @@ bounded by the server.
     "new52WeekHighs": 37,
     "new52WeekLows": 8,
     "breakouts": 21,
-    "failedBreakouts": 4
+    "failedBreakouts": 4,
+    "indices": [
+      {
+        "code": "NIFTY 50",
+        "name": "NIFTY 50",
+        "dataAsOf": "2026-09-04",
+        "lastClose": 25145.2,
+        "periodChangePct": 3.4,
+        "series": [{ "date": "2026-06-09", "close": 24320.1 }]
+      },
+      {
+        "code": "NIFTY 500",
+        "name": "NIFTY 500",
+        "dataAsOf": "2026-09-04",
+        "lastClose": 23120.8,
+        "periodChangePct": 2.7,
+        "series": [{ "date": "2026-06-09", "close": 22510.4 }]
+      }
+    ]
   },
   "countsByState": {
     "READY": 48,
@@ -480,7 +498,8 @@ Replace the placeholder `OverviewPage` with:
 1. `AppShell` header containing brand, primary navigation, security search, and
    user/sign-out controls.
 2. `DataFreshness` showing the market date and import state.
-3. Market regime card with the score, label, benchmark, and breadth evidence.
+3. Market regime card with a compact label, a themed 63-session NIFTY 50 area
+   chart, and a NIFTY 500 breadth section below it.
 4. Lifecycle count cards linking to prefiltered `/setups?state=READY`, etc.
 5. “Highest-ranked setups” list with a link to the complete screener.
 6. A concise disclosure: setup score is ranking evidence, not outcome

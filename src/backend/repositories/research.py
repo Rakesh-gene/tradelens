@@ -59,7 +59,7 @@ class PostgresResearchRepository:
         rows = self._fetch_all(
             """SELECT DISTINCT trading_date FROM adjusted_daily_bars
                WHERE trading_date BETWEEN %s AND %s
-                 AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%')
+                 AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%%')
                ORDER BY trading_date""",
             (from_date, to_date, adjustment_version, adjustment_version),
         )
@@ -87,13 +87,33 @@ class PostgresResearchRepository:
             (as_of_date, as_of_date, as_of_date, index_code, as_of_date, as_of_date),
         )
 
+    def list_historical_security(self, isin, as_of_date):
+        return self._fetch_all(
+            """
+            SELECT equity.isin, equity.symbol, equity.company_name, equity.series,
+                   sector.sector_code, sector.sector_name
+            FROM nse_equities AS equity
+            LEFT JOIN LATERAL (
+                SELECT sm.sector_code, sectors.name AS sector_name
+                FROM security_sector_memberships sm
+                JOIN market_sectors sectors ON sectors.code = sm.sector_code
+                WHERE sm.isin = equity.isin AND sm.effective_from <= %s
+                  AND (sm.effective_to IS NULL OR sm.effective_to >= %s)
+                ORDER BY sm.effective_from DESC LIMIT 1
+            ) sector ON TRUE
+            WHERE equity.isin = %s
+              AND (equity.listed_on IS NULL OR equity.listed_on <= %s)
+            """,
+            (as_of_date, as_of_date, isin, as_of_date),
+        )
+
     def load_outcome_bars(self, isin, entry_date, adjustment_version, limit):
         return self._fetch_all(
             """WITH selected_version AS (
                    SELECT adjustment_version
                    FROM adjusted_daily_bars
                    WHERE isin = %s
-                     AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%')
+                     AND (adjustment_version = %s OR adjustment_version LIKE %s::text || ':%%')
                    GROUP BY adjustment_version
                    ORDER BY CASE WHEN adjustment_version = %s THEN 0 ELSE 1 END,
                             MAX(generated_at) DESC
@@ -178,6 +198,16 @@ class InMemoryResearchRepository:
 
     def list_historical_universe(self, index_code, as_of_date):
         return [dict(row) for row in self.memberships.get((index_code, as_of_date), ())]
+
+    def list_historical_security(self, isin, as_of_date):
+        for (unused_index, session), rows in self.memberships.items():
+            if session == as_of_date:
+                match = next((dict(row) for row in rows if row.get("isin") == isin), None)
+                if match:
+                    return [match]
+        if any(row.get("trading_date") <= as_of_date for row in self.bars.get(isin, ())):
+            return [{"isin": isin}]
+        return []
 
     def load_outcome_bars(self, isin, entry_date, adjustment_version, limit):
         return [dict(row) for row in self.bars.get(isin, ()) if row["trading_date"] >= entry_date][:limit]

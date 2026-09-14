@@ -113,8 +113,9 @@ class PatternEngineRunner:
         self, isin: str, as_of_date: date, versions: PatternEngineVersions,
         *, dry_run: bool = False, initiated_by: str = "manual",
         timeframes: Sequence[str] = ('1D',),
+        security: Mapping[str, object] | None = None,
     ) -> PatternScanReport:
-        security = next(
+        security = security or next(
             (row for row in self._data.list_eligible_securities() if str(row.get("isin")) == isin),
             {"isin": isin},
         )
@@ -289,7 +290,7 @@ class PatternEngineRunner:
             (row for row in self._data.load_technical_features(isin, from_date, as_of, versions.feature) if _row_date(row) <= as_of),
             key=_row_date,
         )
-        eligibility = self._eligibility_decisions(bars, features, as_of)
+        eligibility = self._eligibility_decisions(bars, features, as_of, security)
         failed_rules = [decision["rule"] for decision in eligibility if not decision["passed"]]
         if failed_rules:
             return SecurityScanOutcome(
@@ -497,20 +498,24 @@ class PatternEngineRunner:
             events += result.event_type is not None
         return int(created), int(updated), int(events)
 
-    def _eligibility_decisions(self, bars, features, as_of):
+    def _eligibility_decisions(self, bars, features, as_of, security=None):
         engine_minimum = int(self._configuration.section("engine")["minimum_history_sessions"])
         liquidity = self._configuration.section("liquidity")
         current = features[-1] if features and _row_date(features[-1]) == as_of else None
         latest_bar = bars[-1] if bars and _row_date(bars[-1]) == as_of else None
-        return [
+        decisions = [
             {"rule": "as_of_adjusted_bar_available", "passed": latest_bar is not None},
             {"rule": "minimum_history_sessions", "passed": len(bars) >= engine_minimum,
              "actual": len(bars), "required": engine_minimum},
             {"rule": "as_of_feature_available", "passed": current is not None},
             {"rule": "minimum_close_price", "passed": latest_bar is not None and _number(latest_bar.get("close_price")) >= _number(liquidity["minimum_close_price"])},
-            {"rule": "median_traded_value_20", "passed": current is not None and current.get("median_traded_value_20") is not None and _number(current.get("median_traded_value_20")) >= _number(liquidity["median_traded_value_20"])},
-            {"rule": "median_volume_20", "passed": current is not None and current.get("median_volume_20") is not None and _number(current.get("median_volume_20")) >= _number(liquidity["median_volume_20"])},
         ]
+        if str((security or {}).get("instrumentType") or "EQUITY").upper() != "INDEX":
+            decisions.extend([
+                {"rule": "median_traded_value_20", "passed": current is not None and current.get("median_traded_value_20") is not None and _number(current.get("median_traded_value_20")) >= _number(liquidity["median_traded_value_20"])},
+                {"rule": "median_volume_20", "passed": current is not None and current.get("median_volume_20") is not None and _number(current.get("median_volume_20")) >= _number(liquidity["median_volume_20"])},
+            ])
+        return decisions
 
 
 def _normalize_instances(instances):

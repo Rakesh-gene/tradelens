@@ -42,9 +42,12 @@ class BenchmarkHistoryServiceTestCase(unittest.TestCase):
             date(2016, 9, 9), date(2026, 9, 9)
         )
 
-        self.assertEqual(1, written)
+        self.assertEqual(2, written)
         self.assertEqual(
-            [("NIFTY 500", date(2016, 9, 9), date(2026, 9, 9))],
+            [
+                ("NIFTY 500", date(2016, 9, 9), date(2026, 9, 9)),
+                ("NIFTY 50", date(2016, 9, 9), date(2026, 9, 9)),
+            ],
             client.requests,
         )
         self.assertEqual("NSE", repository.persisted[0]["source_name"])
@@ -58,7 +61,10 @@ class BenchmarkHistoryServiceTestCase(unittest.TestCase):
         )
 
         self.assertEqual(
-            [("NIFTY 500", date(2026, 9, 9), date(2026, 9, 9))],
+            [
+                ("NIFTY 500", date(2026, 9, 9), date(2026, 9, 9)),
+                ("NIFTY 50", date(2026, 9, 9), date(2026, 9, 9)),
+            ],
             client.requests,
         )
 

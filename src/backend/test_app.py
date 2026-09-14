@@ -11,6 +11,8 @@ from uuid import UUID
 from app import InMemoryUserRepository, create_server
 from repositories.pattern_queries import InMemoryPatternQueryRepository
 from repositories.research import InMemoryResearchRepository
+from repositories.watchlists import InMemoryWatchlistRepository
+from repositories.case_studies import InMemoryCaseStudyRepository
 
 
 class EmptyReplayEvaluator:
@@ -50,12 +52,30 @@ class ApiTestCase(unittest.TestCase):
         cls.pattern_repository = InMemoryPatternQueryRepository()
         cls.research_repository = InMemoryResearchRepository()
         cls.admin_pipeline_service = FakeAdminPipelineService()
+        cls.watchlist_repository = InMemoryWatchlistRepository([
+            {"isin": "INE002A01018", "symbol": "RELIANCE", "company_name": "Reliance Industries Limited"},
+        ])
+        cls.case_study_id = "00000000-0000-0000-0000-000000000777"
+        cls.case_study_repository = InMemoryCaseStudyRepository(cases=[{
+            "id": cls.case_study_id, "isin": "INE002A01018", "historical_symbol": "RELIANCE",
+            "historical_company_name": "Reliance Industries Limited", "pattern_class": "BASE",
+            "pattern_type": "BASE-VCP", "timeframe": "1D", "direction": "BULLISH",
+            "lifecycle_state": "TRIGGERED", "detection_date": date(2025, 1, 2),
+            "entry_date": date(2025, 1, 3), "exit_date": date(2025, 1, 6),
+            "entry_price": Decimal("100"), "exit_price": Decimal("110"),
+            "exit_reason": "TARGET_HIT", "net_pnl": Decimal("2000"),
+            "net_return_pct": Decimal("10"), "net_r_multiple": Decimal("2"),
+            "measurements": {}, "supporting_evidence": [], "context": {},
+            "completeness": {"status": "COMPLETED"}, "ambiguity": {}, "lineage": {},
+        }])
         cls.server = create_server(
             port=0, repository=cls.repository,
             pattern_repository=cls.pattern_repository,
             research_repository=cls.research_repository,
             replay_evaluator=EmptyReplayEvaluator(),
             admin_pipeline_service=cls.admin_pipeline_service,
+            watchlist_repository=cls.watchlist_repository,
+            case_study_repository=cls.case_study_repository,
         )
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -185,12 +205,15 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(context.exception.code, 404)
 
     def test_pattern_product_endpoints_require_bearer_token(self) -> None:
-        for path in ("/api/sectors/rotation", "/api/sectors/stocks?sector=TECH&asOf=2026-09-10"):
+        for path in ("/api/sectors/rotation", "/api/sectors/stocks?sector=TECH&asOf=2026-09-10", "/api/indices"):
             with self.assertRaises(HTTPError) as context:
                 urlopen(f"{self.base_url}{path}")
             self.assertEqual(context.exception.code, 401)
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/api/overview")
+        self.assertEqual(context.exception.code, 401)
+        with self.assertRaises(HTTPError) as context:
+            urlopen(f"{self.base_url}/api/watchlist")
         self.assertEqual(context.exception.code, 401)
         with self.assertRaises(HTTPError) as context:
             urlopen(f"{self.base_url}/api/patterns/not-a-real-pattern/chart")
@@ -295,6 +318,11 @@ class ApiTestCase(unittest.TestCase):
         request = Request(f"{self.base_url}/api/sectors/stocks?sector=TECH&asOf=2026-09-10", headers={"Authorization": f"Bearer {token}"})
         with urlopen(request) as response:
             self.assertIn("nextCursor", json.load(response))
+        request = Request(f"{self.base_url}/api/indices", headers={"Authorization": f"Bearer {token}"})
+        with urlopen(request) as response:
+            indices = json.load(response)
+        self.assertIn("categories", indices)
+        self.assertIn("methodology", indices)
 
     def test_authenticated_reliance_fingerprint_returns_data_and_lineage_contract(self) -> None:
         self.repository.create_user(
@@ -338,6 +366,36 @@ class ApiTestCase(unittest.TestCase):
             matches = json.load(response)["items"]
         self.assertEqual("INE002A01018", matches[0]["isin"])
 
+    def test_authenticated_user_can_add_list_and_remove_watchlist_stock(self) -> None:
+        self.repository.create_user(
+            "watchlist@example.com",
+            "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f",
+        )
+        login = Request(
+            f"{self.base_url}/api/login", method="POST",
+            data=json.dumps({"email": "watchlist@example.com", "password": "password123"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(login) as response:
+            token = json.load(response)["accessToken"]
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        add = Request(
+            f"{self.base_url}/api/watchlist", method="POST",
+            data=json.dumps({"isin": "INE002A01018"}).encode(), headers=headers,
+        )
+        with urlopen(add) as response:
+            self.assertEqual(201, response.status)
+            self.assertTrue(json.load(response)["added"])
+        with urlopen(Request(f"{self.base_url}/api/watchlist", headers=headers)) as response:
+            payload = json.load(response)
+        self.assertEqual(1, payload["count"])
+        self.assertEqual("RELIANCE", payload["items"][0]["security"]["symbol"])
+        remove = Request(
+            f"{self.base_url}/api/watchlist/INE002A01018", method="DELETE", headers=headers,
+        )
+        with urlopen(remove) as response:
+            self.assertTrue(json.load(response)["removed"])
+
     def test_authenticated_research_run_and_results_contract(self) -> None:
         self.repository.create_user(
             "research@example.com",
@@ -370,6 +428,21 @@ class ApiTestCase(unittest.TestCase):
             payload = json.load(response)
         self.assertEqual("COMPLETED", payload["run"]["status"])
         self.assertEqual(0, payload["summary"]["totalEntries"])
+
+    def test_case_study_product_endpoints_are_authenticated_and_reachable(self) -> None:
+        with self.assertRaises(HTTPError) as context:
+            urlopen(f"{self.base_url}/api/case-studies")
+        self.assertEqual(401, context.exception.code)
+        self.repository.create_user("cases@example.com", "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f")
+        login = Request(f"{self.base_url}/api/login", method="POST", data=json.dumps({"email": "cases@example.com", "password": "password123"}).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(login) as response: token = json.load(response)["accessToken"]
+        headers = {"Authorization": f"Bearer {token}"}
+        with urlopen(Request(f"{self.base_url}/api/case-studies?patternType=BASE-VCP", headers=headers)) as response:
+            self.assertEqual(self.case_study_id, json.load(response)["items"][0]["caseStudyId"])
+        with urlopen(Request(f"{self.base_url}/api/case-studies/{self.case_study_id}", headers=headers)) as response:
+            self.assertEqual("TARGET_HIT", json.load(response)["caseStudy"]["exitReason"])
+        with urlopen(Request(f"{self.base_url}/api/case-studies/facets", headers=headers)) as response:
+            self.assertIn("patternTypes", json.load(response)["facets"])
 
 
 if __name__ == "__main__":

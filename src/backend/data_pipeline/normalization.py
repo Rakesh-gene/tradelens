@@ -232,10 +232,22 @@ def parse_index_history_response(payload: object, index_name: str) -> list[NseIn
     for raw_record in _extract_records(payload, normalized_index):
         fields = _normalized_fields(raw_record)
         trading_date = _required_date(fields, ("timestamp", "date", "historicaldate", "ch_timestamp"), normalized_index)
-        open_price = _required_positive_decimal(fields, ("open", "open_price", "ch_opening_price"), normalized_index, trading_date)
-        high_price = _required_positive_decimal(fields, ("high", "high_price", "ch_trade_high_price"), normalized_index, trading_date)
-        low_price = _required_positive_decimal(fields, ("low", "low_price", "ch_trade_low_price"), normalized_index, trading_date)
-        close_price = _required_positive_decimal(fields, ("close", "close_price", "ch_closing_price"), normalized_index, trading_date)
+        aliases = (
+            ("open", "open_price", "ch_opening_price"),
+            ("high", "high_price", "ch_trade_high_price"),
+            ("low", "low_price", "ch_trade_low_price"),
+            ("close", "close_price", "ch_closing_price"),
+        )
+        values = [_optional_decimal(fields, names, normalized_index, trading_date) for names in aliases]
+        # Some index inception records published by NSE contain only a close.
+        # They cannot form a valid candle, so omit the isolated row rather than
+        # fabricating OHLC values or rejecting the index's remaining history.
+        if any(value is None for value in values):
+            continue
+        open_price, high_price, low_price, close_price = values
+        for field_name, value in zip(("open", "high", "low", "close"), values):
+            if value <= 0:
+                raise NseDataValidationError(normalized_index, field_name, "must be positive", trading_date)
         _validate_ohlc(normalized_index, trading_date, open_price, high_price, low_price, close_price)
         records.append(
             NseIndexHistoryRecord(

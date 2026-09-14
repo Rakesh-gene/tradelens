@@ -54,6 +54,8 @@ class AdminPipelineService:
         equity_collector=None,
         classification_collector=None,
         sector_repository=None,
+        quadrant_tracker: Callable[[], int] | None = None,
+        index_pipeline=None,
     ) -> None:
         if not 1 <= max_workers <= 8:
             raise ValueError("max_workers must be between 1 and 8")
@@ -69,6 +71,8 @@ class AdminPipelineService:
         self._equity_collector = equity_collector
         self._classification_collector = classification_collector
         self._sector_repository = sector_repository
+        self._quadrant_tracker = quadrant_tracker
+        self._index_pipeline = index_pipeline
 
     def list_equities(self, query: Mapping[str, list[str]]) -> dict[str, object]:
         page = _bounded_integer(_one(query, "page"), 1, 1, 100_000, "page")
@@ -399,11 +403,13 @@ class AdminPipelineService:
                 self._sector_repository.refresh_sector_snapshots(to_date, versions.feature)
             except Exception as error:
                 errors.append(f"Sector snapshot refresh: {str(error)[:500]}")
+        self._run_scheduled_indices(from_date, to_date, trigger_source, errors)
         status = "PARTIAL" if completed and failed else "FAILED" if failed else "COMPLETED"
         self._repository.update_pipeline_run(
             run_id, status, securities_completed=completed, securities_failed=failed,
             error_summary="; ".join(errors[:20]) or None, finished=True,
         )
+        self._reconcile_watchlist_quadrants(to_date)
         if self._logger:
             self._logger.emit(
                 "admin_pipeline_completed", level="ERROR" if failed else "INFO",
@@ -473,11 +479,13 @@ class AdminPipelineService:
                         run_id, "RUNNING", securities_completed=completed,
                         securities_failed=failed,
                     )
+        self._run_scheduled_indices(from_date, to_date, trigger_source, errors)
         status = "PARTIAL" if completed and failed else "FAILED" if failed else "COMPLETED"
         self._repository.update_pipeline_run(
             run_id, status, securities_completed=completed, securities_failed=failed,
             error_summary="; ".join(errors[:20]) or None, finished=True,
         )
+        self._reconcile_watchlist_quadrants(to_date)
         if self._logger:
             self._logger.emit(
                 "admin_pipeline_completed", level="ERROR" if failed else "INFO",
@@ -608,6 +616,35 @@ class AdminPipelineService:
             self._configuration.version,
             adjustment,
         )
+
+    def _reconcile_watchlist_quadrants(self, as_of: date) -> None:
+        if self._quadrant_tracker is None:
+            return
+        try:
+            created = self._quadrant_tracker()
+            if self._logger:
+                self._logger.emit(
+                    "watchlist_quadrants_reconciled", job_type="ADMIN_FULL_PIPELINE",
+                    source_status="COMPLETED", row_count=created,
+                    details={"asOf": as_of.isoformat()},
+                )
+        except Exception as error:
+            if self._logger:
+                self._logger.emit(
+                    "watchlist_quadrant_reconciliation_failed", level="ERROR",
+                    job_type="ADMIN_FULL_PIPELINE", source_status="FAILED",
+                    details={"asOf": as_of.isoformat(), "error": str(error)[:500]},
+                )
+
+    def _run_scheduled_indices(self, from_date, to_date, trigger_source, errors):
+        if trigger_source != "SCHEDULED" or self._index_pipeline is None:
+            return
+        try:
+            result = self._index_pipeline.run(from_date, to_date, initiated_by="scheduler")
+            if result.get("failed"):
+                errors.append(f"Index pipeline: {result['failed']} index failure(s)")
+        except Exception as error:
+            errors.append(f"Index pipeline: {str(error)[:500]}")
 
     @staticmethod
     def _start_thread(action):

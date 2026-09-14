@@ -37,7 +37,7 @@ class PatternEngineEnumTestCase(unittest.TestCase):
         self.assertEqual([item.value for item in ZoneType], ["RESISTANCE", "SUPPORT"])
         self.assertEqual([item.value for item in ImportJobType], [
             "EQUITY_MASTER", "EQUITY_CLASSIFICATION", "HISTORY_BACKFILL", "CORPORATE_ACTION_BACKFILL", "DAILY_DELTA",
-            "ADJUSTMENT_REBUILD", "FEATURE_REBUILD", "PATTERN_SCAN"
+            "ADJUSTMENT_REBUILD", "FEATURE_REBUILD", "PATTERN_SCAN", "INDEX_PIPELINE"
         ])
         self.assertEqual([item.value for item in ImportStatus], [
             "PENDING", "RUNNING", "COMPLETED", "PARTIAL", "FAILED", "CANCELLED"

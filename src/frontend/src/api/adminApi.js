@@ -27,3 +27,22 @@ export function controlPipelineRun(runId, action, options = {}) {
     body: {},
   })
 }
+
+export function createCaseStudyRun(body, options = {}) {
+  return authenticatedRequest('/api/admin/case-study-runs', { ...options, method: 'POST', body })
+}
+export function getCaseStudyRun(runId, options = {}) {
+  return authenticatedRequest(`/api/admin/case-study-runs/${encodeURIComponent(runId)}`, options)
+}
+export function getCaseStudyRunItems(runId, query, options = {}) {
+  return authenticatedRequest(`/api/admin/case-study-runs/${encodeURIComponent(runId)}/items`, { ...options, query })
+}
+export function resumeCaseStudyRun(runId, options = {}) {
+  return authenticatedRequest(`/api/admin/case-study-runs/${encodeURIComponent(runId)}/resume`, { ...options, method: 'POST', body: {} })
+}
+export function getCaseStudyReviewQueue(query = {}, options = {}) {
+  return authenticatedRequest('/api/admin/case-studies', { ...options, query })
+}
+export function reviewCaseStudy(caseStudyId, status, options = {}) {
+  return authenticatedRequest(`/api/admin/case-studies/${encodeURIComponent(caseStudyId)}/review`, { ...options, method: 'POST', body: { status } })
+}

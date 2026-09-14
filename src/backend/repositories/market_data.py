@@ -181,6 +181,7 @@ class PostgresMarketDataRepository:
         statement = """
             SELECT isin, symbol, company_name, series, listed_on
             FROM nse_equities
+            WHERE series = 'EQ'
             ORDER BY isin
         """
         return self._fetch_all(statement, ())

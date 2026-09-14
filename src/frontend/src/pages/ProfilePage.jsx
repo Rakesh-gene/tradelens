@@ -31,7 +31,7 @@ export default function ProfilePage({ user, theme, onThemeChange, onProfileUpdat
 
   return <section className="profile-page" aria-labelledby="profile-title">
     <header className="page-intro">
-      <div><h1 id="profile-title">Profile</h1></div>
+      <div><p className="eyebrow">Your account</p><h1 id="profile-title">Profile</h1><p>Review your account details and choose how TradeLens looks.</p></div>
     </header>
     <div className="profile-layout">
       <section className="surface-card profile-account" aria-labelledby="account-heading">

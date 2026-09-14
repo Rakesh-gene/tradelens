@@ -130,7 +130,7 @@ export default function PatternScannerPage({ onNavigate, onUnauthorized }) {
   const timeframeLabel = TIMEFRAMES.find((item) => item.value === timeframe)?.label || timeframe
 
   return <>
-    <PageIntro eyebrow='Pattern discovery' title='Pattern scanner' description='Find server-detected chart structures across daily, weekly, and monthly intervals, then inspect their evidence.' date={resource.data?.dataAsOf} />
+    <PageIntro eyebrow='Explore patterns' title='Pattern scanner' description='Find active daily, weekly, and monthly chart patterns, then open any result to see why it qualified.' date={resource.data?.dataAsOf} />
     <section className='scanner-panel' aria-label='Pattern scanner controls'>
       <div><p className='eyebrow'>Timeframe</p><h2>Select a completed chart interval</h2></div>
       <div className='scanner-tabs' role='tablist' aria-label='Chart timeframe'>{TIMEFRAMES.map((item) => <button key={item.value} type='button' role='tab' aria-selected={timeframe === item.value} className={timeframe === item.value ? 'is-active' : ''} onClick={() => updateView({ timeframe: item.value })}><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>
@@ -141,7 +141,7 @@ export default function PatternScannerPage({ onNavigate, onUnauthorized }) {
       </div>
     </section>
     <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
-      {resource.data && <section aria-labelledby='scanner-results'><div className='section-heading'><div><p className='eyebrow'>{timeframeLabel} scan</p><h2 id='scanner-results'>Detected market structures</h2></div><p>{resource.data.totalCount || 0} active patterns ranked by setup score.</p></div>{resource.data.items?.length ? <div className='setup-grid'>{resource.data.items.map((setup) => <SetupCard key={setup.patternInstanceId} setup={setup} onNavigate={onNavigate} />)}</div> : <EmptyState title={`No active ${timeframeLabel.toLowerCase()} patterns`} message='Run Pattern discovery from the Pipeline page or broaden the selected family and direction.' />}</section>}
+      {resource.data && <section aria-labelledby='scanner-results'><div className='section-heading'><div><p className='eyebrow'>{timeframeLabel} view</p><h2 id='scanner-results'>Active patterns</h2></div><p>{resource.data.totalCount || 0} patterns found.</p></div>{resource.data.items?.length ? <div className='setup-grid'>{resource.data.items.map((setup) => <SetupCard key={setup.patternInstanceId} setup={setup} onNavigate={onNavigate} />)}</div> : <EmptyState title={`No active ${timeframeLabel.toLowerCase()} patterns`} message='Try another pattern family, direction, or timeframe.' />}</section>}
     </ResourceState>
     <details className='scanner-library'>
       <summary><span><span className='eyebrow'>Detection library</span><strong>View pattern coverage</strong></span><span>Implemented and planned families</span></summary>

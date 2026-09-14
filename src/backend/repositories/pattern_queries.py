@@ -351,6 +351,22 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             """, (as_of,),
         ) or {}
 
+    def index_overview_rows(self, as_of, sessions):
+        return self._fetch_all(
+            """
+            WITH ranked AS (
+                SELECT index_code, trading_date, close_price,
+                       ROW_NUMBER() OVER (PARTITION BY index_code ORDER BY trading_date DESC) AS recency
+                FROM index_daily_bars
+                WHERE index_code = ANY(%s) AND (%s IS NULL OR trading_date <= %s)
+            )
+            SELECT index_code, trading_date, close_price
+            FROM ranked WHERE recency <= %s
+            ORDER BY CASE index_code WHEN 'NIFTY 50' THEN 1 ELSE 2 END, trading_date
+            """,
+            (["NIFTY 50", "NIFTY 500"], as_of, as_of, sessions),
+        )
+
     def latest_scan_run(self):
         return self._fetch_one(
             """SELECT status, started_at, finished_at, securities_total,
@@ -548,13 +564,14 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
 class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
     """Small contract-compatible query store for HTTP and service tests."""
 
-    def __init__(self, patterns=(), events=(), securities=(), features=(), bars=(), run=None, actions=()):
+    def __init__(self, patterns=(), events=(), securities=(), features=(), bars=(), run=None, actions=(), index_bars=()):
         self.patterns = [dict(value) for value in patterns]
         self.events = [dict(value) for value in events]
         self.securities = {str(value["isin"]): dict(value) for value in securities}
         self.features = [dict(value) for value in features]
         self.bars = [dict(value) for value in bars]
         self.actions = [dict(value) for value in actions]
+        self.index_bars = [dict(value) for value in index_bars]
         self.run = dict(run or {})
 
     def search_securities(self, query, limit):
@@ -681,6 +698,14 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
                 for feature in self.features
             ),
         }
+
+    def index_overview_rows(self, as_of, sessions):
+        rows = [row for row in self.index_bars if as_of is None or row.get("trading_date") <= as_of]
+        result = []
+        for code in ("NIFTY 50", "NIFTY 500"):
+            selected = sorted((row for row in rows if row.get("index_code") == code), key=lambda row: row["trading_date"])[-sessions:]
+            result.extend(selected)
+        return result
 
     def latest_scan_run(self): return dict(self.run)
     def get_pattern(self, pattern_id):

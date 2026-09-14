@@ -86,6 +86,18 @@ class HistoricalResearchTestCase(unittest.TestCase):
         self.assertIsNone(probability["probabilityPct"])
         self.assertTrue(response["run"]["pointInTimePolicy"]["effectiveMembership"])
 
+    def test_replay_can_target_one_explicit_stock(self):
+        session = date(2026, 1, 1)
+        repository = InMemoryResearchRepository(sessions=[session], bars={"INE002A01018": _bars("INE002A01018", session, 65)})
+        evaluator = FakeEvaluator()
+        response = BacktestService(repository, evaluator).start({
+            "fromDate": session.isoformat(), "toDate": session.isoformat(),
+            "universe": {"isin": "INE002A01018"},
+            "versions": {"engine": "e1", "configuration": "c1", "feature": "f1", "adjustment": "a1"},
+        })
+        self.assertEqual([("INE002A01018", session)], evaluator.calls)
+        self.assertEqual({"isin": "INE002A01018", "selectionPolicy": "explicit-security"}, response["run"]["universe"])
+
     def test_probability_is_shown_only_at_the_minimum_sample(self):
         rows = [{"returns_by_horizon": {"5": _D("2")}, "hit_before_loss": {"plus5BeforeMinus5": value}} for value in (True, False, True)]
         summary = summarize_results(rows, 3)

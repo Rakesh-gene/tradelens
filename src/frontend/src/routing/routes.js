@@ -6,8 +6,12 @@ const STATIC_ROUTES = new Map([
   ['/overview', { name: 'overview', protected: true }],
   ['/sector-rotation', { name: 'sector-rotation', protected: true }],
   ['/setups', { name: 'setups', protected: true }],
+  ['/watchlist', { name: 'watchlist', protected: true }],
+  ['/indices', { name: 'indices', protected: true, entitlement: 'indices' }],
   ['/profile', { name: 'profile', protected: true }],
+  ['/case-studies', { name: 'case-studies', protected: true }],
   ['/admin/pipeline', { name: 'admin-pipeline', protected: true, admin: true }],
+  ['/admin/case-studies', { name: 'admin-case-studies', protected: true, admin: true }],
 ])
 
 export function normalizePathname(pathname) {
@@ -26,6 +30,11 @@ export function matchRoute(pathname) {
     return patternId && isUuid(patternId)
       ? { name: 'pattern-detail', protected: true, params: { patternId } }
       : { name: 'not-found', protected: true, params: {} }
+  }
+  const caseStudyMatch = path.match(/^\/case-studies\/([^/]+)$/)
+  if (caseStudyMatch) {
+    const caseStudyId = safeDecodeSegment(caseStudyMatch[1])
+    return caseStudyId && isUuid(caseStudyId) ? { name: 'case-study-detail', protected: true, params: { caseStudyId } } : { name: 'not-found', protected: true, params: {} }
   }
 
   const securityMatch = path.match(/^\/securities\/([^/]+)$/)
@@ -48,6 +57,11 @@ export function buildSecurityPath(isin) {
   const normalized = String(isin || '').toUpperCase()
   if (!isIsin(normalized)) throw new TypeError('A valid ISIN is required.')
   return `/securities/${encodeURIComponent(normalized)}`
+}
+
+export function buildCaseStudyPath(caseStudyId) {
+  if (!isUuid(caseStudyId)) throw new TypeError('A valid case-study UUID is required.')
+  return `/case-studies/${encodeURIComponent(caseStudyId)}`
 }
 
 export function isProtectedRoute(route) {

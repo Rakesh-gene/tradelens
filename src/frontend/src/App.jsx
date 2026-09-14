@@ -12,10 +12,15 @@ import { applyTheme, readTheme } from './themePreferences.js'
 const OverviewPage = lazy(() => import('./pages/OverviewPage.jsx'))
 const SectorRotationPage = lazy(() => import('./pages/SectorRotationPage.jsx'))
 const SetupsPage = lazy(() => import('./pages/SetupsPage.jsx'))
+const WatchlistPage = lazy(() => import('./pages/WatchlistPage.jsx'))
+const IndicesPage = lazy(() => import('./pages/IndicesPage.jsx'))
 const PatternDetailPage = lazy(() => import('./pages/PatternDetailPage.jsx'))
 const SecurityPage = lazy(() => import('./pages/SecurityPage.jsx'))
 const AdminPipelinePage = lazy(() => import('./pages/AdminPipelinePage.jsx'))
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'))
+const CaseStudiesPage = lazy(() => import('./pages/CaseStudiesPage.jsx'))
+const CaseStudyDetailPage = lazy(() => import('./pages/CaseStudyDetailPage.jsx'))
+const AdminCaseStudyPage = lazy(() => import('./pages/AdminCaseStudyPage.jsx'))
 
 function currentLocation() {
   return `${window.location.pathname}${window.location.search}`
@@ -30,6 +35,7 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState('')
   const [showLoginDisclaimer, setShowLoginDisclaimer] = useState(false)
   const [theme, setTheme] = useState(readTheme)
+  const [watchlistRevision, setWatchlistRevision] = useState(0)
   const route = matchRoute(window.location.pathname)
   const dismissLoginDisclaimer = useCallback(() => setShowLoginDisclaimer(false), [])
 
@@ -142,10 +148,15 @@ export default function App() {
   if (route.name === 'overview') page = <OverviewPage {...common} />
   else if (route.name === 'sector-rotation') page = <SectorRotationPage key={location} {...common} />
   else if (route.name === 'setups') page = <SetupsPage key={location} {...common} />
+  else if (route.name === 'watchlist') page = <WatchlistPage {...common} revision={watchlistRevision} />
+  else if (route.name === 'indices') page = <IndicesPage key={location} {...common} />
   else if (route.name === 'pattern-detail') page = <PatternDetailPage patternId={route.params.patternId} {...common} />
   else if (route.name === 'security') page = <SecurityPage isin={route.params.isin} {...common} />
   else if (route.name === 'profile') page = <ProfilePage {...common} user={user} theme={theme} onThemeChange={setTheme} onProfileUpdated={setUser} />
+  else if (route.name === 'case-studies') page = <CaseStudiesPage key={location} {...common} />
+  else if (route.name === 'case-study-detail') page = <CaseStudyDetailPage caseStudyId={route.params.caseStudyId} {...common} />
   else if (route.name === 'admin-pipeline' && (user?.isAdmin || user?.is_admin)) page = <AdminPipelinePage {...common} />
+  else if (route.name === 'admin-case-studies' && (user?.isAdmin || user?.is_admin)) page = <AdminCaseStudyPage {...common} />
 
-  return <AppShell user={user} onNavigate={navigate} onSignOut={signOut} showLoginDisclaimer={showLoginDisclaimer} onDismissLoginDisclaimer={dismissLoginDisclaimer}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>
+  return <AppShell user={user} onNavigate={navigate} onSignOut={signOut} onWatchlistChanged={() => setWatchlistRevision((value) => value + 1)} showLoginDisclaimer={showLoginDisclaimer} onDismissLoginDisclaimer={dismissLoginDisclaimer}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>
 }
