@@ -16,10 +16,11 @@ from pattern_engine.models import serialize_value
 
 class PatternQueryRepository(Protocol):
     def sector_rotation_rows(self, as_of): ...
+    def sector_rotation_history_rows(self, as_of, sessions=5): ...
     def sector_strength_stocks(self, as_of, sector, limit, offset): ...
     def search_securities(self, query, limit): ...
     def list_setups(self, filters, limit, offset): ...
-    def setup_facets(self, as_of): ...
+    def setup_facets(self, as_of, equities_only=False): ...
     def overview_summary(self, as_of): ...
     def index_overview_rows(self, as_of, sessions): ...
     def latest_scan_run(self): ...
@@ -42,7 +43,10 @@ class PatternQueryService:
     def sector_rotation(self, query):
         from pattern_engine.sector_rotation import rotation_payload
         as_of = _optional_date(_one(query, "asOf")) or date.today()
-        return rotation_payload(self._repository.sector_rotation_rows(as_of))
+        return rotation_payload(
+            self._repository.sector_rotation_rows(as_of),
+            self._repository.sector_rotation_history_rows(as_of, sessions=5),
+        )
 
     def sector_stocks(self, query):
         as_of = _optional_date(_one(query, "asOf"))
@@ -69,6 +73,7 @@ class PatternQueryService:
         data_as_of = summary.get("data_as_of") or as_of
         setup_filters = _default_filters(data_as_of or date.today())
         setup_filters["states"] = ("READY", "TRIGGERED", "CONFIRMED")
+        setup_filters["equities_only"] = True
         rows = self._repository.list_setups(setup_filters, top, 0)[:top]
         run = self._repository.latest_scan_run()
         regime = _number(summary.get("regime_score"))
@@ -116,12 +121,13 @@ class PatternQueryService:
 
     def setups(self, query):
         filters = self._setup_filters(query)
+        filters["equities_only"] = True
         page_size = _integer(_one(query, "pageSize"), 25, 10, 100, "pageSize")
         offset = _decode_cursor(_one(query, "cursor"))
         rows = self._repository.list_setups(filters, page_size, offset)
         has_more = len(rows) > page_size
         total_count = int(rows[0].get("total_count") or 0) if rows else 0
-        facets = _complete_pattern_type_facets(self._repository.setup_facets(filters["as_of"]))
+        facets = _complete_pattern_type_facets(self._repository.setup_facets(filters["as_of"], equities_only=True))
         return {
             "dataAsOf": filters["as_of"],
             "items": [_setup(row) for row in rows[:page_size]],

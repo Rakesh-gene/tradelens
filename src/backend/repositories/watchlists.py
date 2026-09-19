@@ -93,7 +93,8 @@ class PostgresWatchlistRepository:
                        pattern.id AS pattern_id, pattern.pattern_class, pattern.pattern_type,
                        pattern.variant, pattern.state, pattern.setup_score, pattern.pivot_price,
                        pattern.support_price, pattern.invalidation_price,
-                       recent_event.new_state AS recent_event_state
+                       recent_event.new_state AS recent_event_state,
+                       rotation_history.points AS rotation_history
                 FROM user_watchlist watch
                 JOIN nse_equities equity ON equity.isin = watch.isin
                 LEFT JOIN LATERAL (
@@ -136,6 +137,26 @@ class PostgresWatchlistRepository:
                 ) snapshot ON TRUE
                 LEFT JOIN sector_rs ON sector_rs.sector_code = sector.sector_code
                   AND sector_rs.trading_date = feature.trading_date
+                LEFT JOIN LATERAL (
+                    SELECT jsonb_agg(
+                               jsonb_build_object(
+                                   'date', historical.trading_date,
+                                   'strength', historical.relative_strength_3m,
+                                   'momentum', historical.relative_strength_1m - historical.relative_strength_3m / 3.0
+                               ) ORDER BY historical.trading_date
+                           ) AS points
+                    FROM (
+                        SELECT DISTINCT ON (features.trading_date)
+                               features.trading_date, features.relative_strength_1m,
+                               features.relative_strength_3m
+                        FROM technical_features features
+                        WHERE features.isin = watch.isin
+                        ORDER BY features.trading_date DESC, features.generated_at DESC, features.feature_version DESC
+                        LIMIT 5
+                    ) historical
+                    WHERE historical.relative_strength_1m IS NOT NULL
+                      AND historical.relative_strength_3m IS NOT NULL
+                ) rotation_history ON TRUE
                 LEFT JOIN LATERAL (
                     SELECT id, pattern_class, pattern_type, variant, state, setup_score,
                            pivot_price, support_price, invalidation_price

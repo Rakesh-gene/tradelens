@@ -34,6 +34,9 @@ export function createCaseStudyRun(body, options = {}) {
 export function getCaseStudyRun(runId, options = {}) {
   return authenticatedRequest(`/api/admin/case-study-runs/${encodeURIComponent(runId)}`, options)
 }
+export function getLatestCaseStudyRun(options = {}) {
+  return authenticatedRequest('/api/admin/case-study-runs/latest', options)
+}
 export function getCaseStudyRunItems(runId, query, options = {}) {
   return authenticatedRequest(`/api/admin/case-study-runs/${encodeURIComponent(runId)}/items`, { ...options, query })
 }
@@ -45,4 +48,7 @@ export function getCaseStudyReviewQueue(query = {}, options = {}) {
 }
 export function reviewCaseStudy(caseStudyId, status, options = {}) {
   return authenticatedRequest(`/api/admin/case-studies/${encodeURIComponent(caseStudyId)}/review`, { ...options, method: 'POST', body: { status } })
+}
+export function deleteCaseStudy(caseStudyId, options = {}) {
+  return authenticatedRequest(`/api/admin/case-studies/${encodeURIComponent(caseStudyId)}`, { ...options, method: 'DELETE' })
 }

@@ -2,10 +2,9 @@
 
 ROTATION_CTE = """WITH sessions AS (
     SELECT DISTINCT trading_date FROM technical_features
-    WHERE trading_date <= %(as_of)s ORDER BY trading_date DESC LIMIT 1
+    WHERE trading_date <= %(as_of)s ORDER BY trading_date DESC LIMIT %(session_count)s
 ), dates AS (
-    SELECT MAX(trading_date) AS current_date
-    FROM sessions
+    SELECT trading_date AS current_date FROM sessions
 ), members AS (
     SELECT DISTINCT m.sector_code, s.name AS sector_name, e.isin, e.symbol,
            e.company_name, d.current_date AS data_as_of,
@@ -29,6 +28,12 @@ ROTATION_CTE = """WITH sessions AS (
 
 class SectorRotationQueries:
     def sector_rotation_rows(self, as_of):
+        return self._rotation_rows(as_of, 1)
+
+    def sector_rotation_history_rows(self, as_of, sessions=5):
+        return self._rotation_rows(as_of, sessions)
+
+    def _rotation_rows(self, as_of, session_count):
         return self._fetch_all(ROTATION_CTE + """
             SELECT sector_code, sector_name, data_as_of,
                    COUNT(*) AS member_count, COUNT(relative_strength_3m) AS covered_count,
@@ -45,7 +50,7 @@ class SectorRotationQueries:
                      FILTER (WHERE relative_strength_1m IS NOT NULL) AS baseline_rs
             FROM members GROUP BY sector_code, sector_name, data_as_of
             ORDER BY rs_3m DESC NULLS LAST, sector_code
-        """, {"as_of": as_of})
+        """, {"as_of": as_of, "session_count": session_count})
 
     def sector_strength_stocks(self, as_of, sector, limit, offset):
         return self._fetch_all(ROTATION_CTE + """
@@ -53,16 +58,19 @@ class SectorRotationQueries:
             FROM members WHERE sector_code = %(sector)s
             ORDER BY relative_strength_3m DESC NULLS LAST, isin
             LIMIT %(limit)s OFFSET %(offset)s
-        """, {"as_of": as_of, "sector": sector, "limit": limit + 1, "offset": offset})
+        """, {"as_of": as_of, "session_count": 1, "sector": sector, "limit": limit + 1, "offset": offset})
 
 
 class MemorySectorRotationQueries:
     def _sector_members(self, as_of):
         from datetime import date
-        dates = sorted({f["trading_date"] for f in self.features if f["trading_date"] <= as_of}, reverse=True)[:1]
+        dates = sorted({f["trading_date"] for f in self.features if f["trading_date"] <= as_of}, reverse=True)
         if not dates:
             return []
-        current = dates[0]
+        return self._sector_members_on(dates[0])
+
+    def _sector_members_on(self, current):
+        from datetime import date
         members = []
         for security in self.securities.values():
             start = security.get("effective_from", date.min)
@@ -76,8 +84,15 @@ class MemorySectorRotationQueries:
         return members
 
     def sector_rotation_rows(self, as_of):
+        return self._rotation_rows(self._sector_members(as_of))
+
+    def sector_rotation_history_rows(self, as_of, sessions=5):
+        dates = sorted({f["trading_date"] for f in self.features if f["trading_date"] <= as_of}, reverse=True)[:sessions]
+        return [row for current in dates for row in self._rotation_rows(self._sector_members_on(current))]
+
+    @staticmethod
+    def _rotation_rows(members):
         from statistics import median
-        members = self._sector_members(as_of)
         result = []
         for code in sorted({m["sector_code"] for m in members}):
             cohort = [m for m in members if m["sector_code"] == code]

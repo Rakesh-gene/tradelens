@@ -9,12 +9,13 @@ import re
 from threading import Lock, Thread
 
 from pattern_engine.case_study_selection import SELECTION_POLICY_VERSION, select_representative_cases
+from pattern_engine.enums import SETUP_PATTERN_TYPES
 from pattern_engine.positional_performance import calculate_positional_performance, preferred_forward_return
 from pattern_engine.trade_simulation import SwingTradePolicy, simulate_swing_trade
 
 ACTIVE_ENTRY_STATES = {"TRIGGERED", "CONFIRMED"}
 TIMEFRAMES = {"1D", "1W", "1M"}
-TRADE_DIRECTIONS = {"BULLISH", "BEARISH"}
+TRADE_DIRECTIONS = {"BULLISH", "BEARISH", "NEUTRAL"}
 LOOKBACK_MONTHS = {"3M": 3, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60}
 
 class CaseStudyPipeline:
@@ -41,7 +42,7 @@ class CaseStudyPipeline:
             "requested_from_date": from_date, "requested_to_date": to_date,
             "universe": {"isin": request["isin"], "symbol": context.get("symbol"), "companyName": context.get("company_name"), "lookback": request["lookback"]},
             "source_backtest_run_id": None,
-            "requested_pattern_types": [], "requested_timeframes": ["1D", "1W", "1M"],
+            "requested_pattern_types": list(SETUP_PATTERN_TYPES), "requested_timeframes": ["1D", "1W", "1M"],
             "engine_version": self._versions.engine, "configuration_version": self._configuration_version,
             "feature_version": self._versions.feature, "adjustment_version": self._versions.adjustment,
             "trade_policy_version": policy.version, "selection_policy_version": SELECTION_POLICY_VERSION,
@@ -70,7 +71,12 @@ class CaseStudyPipeline:
     def _prepare_source(self, run_id):
         run = self._repository.get_run(run_id)
         if run is None: raise LookupError("Case-study run not found")
-        if run.get("source_backtest_run_id"): return
+        if run.get("source_backtest_run_id"):
+            previous = self._research_service.get_run(str(run["source_backtest_run_id"]))["run"] if self._research_service else None
+            if previous and previous["status"] == "COMPLETED": return
+            # An interrupted replay is not complete point-in-time evidence.
+            # Restart it as a new source run rather than building from a prefix.
+            self._repository.update_run(run_id, source_backtest_run_id=None)
         if self._research_service is None: raise RuntimeError("Historical replay is not configured")
         self._repository.update_run(run_id, status="RUNNING", started_at=run.get("started_at") or datetime.now(timezone.utc), completed_at=None)
         source = self._research_service.start({
@@ -80,7 +86,7 @@ class CaseStudyPipeline:
                 "engine": run["engine_version"], "configuration": run["configuration_version"],
                 "feature": run["feature_version"], "adjustment": run["adjustment_version"],
             },
-        }, run.get("requested_by"))
+        }, run.get("requested_by"), on_run_created=lambda source_id: self._repository.update_run(run_id, source_backtest_run_id=source_id))
         source_run = source["run"]
         if source_run["status"] != "COMPLETED": raise RuntimeError("Historical replay did not complete")
         self._repository.update_run(run_id, source_backtest_run_id=source_run["runId"])
@@ -132,8 +138,11 @@ class CaseStudyPipeline:
         candidate = fingerprint.get("candidate") or fingerprint
         signal_date = _date(candidate.get("trigger_date") or candidate.get("detected_date") or entry["entry_date"])
         bars = self._repository.load_trade_bars(entry["isin"], signal_date, run["adjustment_version"], 252)
-        direction = str(candidate.get("direction") or "BULLISH").upper()
-        trade = simulate_swing_trade(signal_date=signal_date, bars=bars, invalidation_price=candidate.get("invalidation_price"), pivot_price=candidate.get("pivot_price"), direction=direction, policy=policy)
+        direction = str(candidate.get("direction") or "NEUTRAL").upper()
+        # A neutral setup still has meaningful forward stock performance. The
+        # legacy trade simulation is secondary lineage and models a long stock.
+        trade_direction = "BULLISH" if direction == "NEUTRAL" else direction
+        trade = simulate_swing_trade(signal_date=signal_date, bars=bars, invalidation_price=candidate.get("invalidation_price"), pivot_price=candidate.get("pivot_price"), direction=trade_direction, policy=policy)
         performance = calculate_positional_performance(signal_date=signal_date, bars=bars)
         return {
             "source": entry, "candidate": candidate, "fingerprint": fingerprint, "trade": trade, "positional_performance": performance,
@@ -151,8 +160,30 @@ class CaseStudyPipeline:
         row = self._repository.get_run(run_id)
         if row is None: raise LookupError("Case-study run not found")
         payload = _run_payload(row)
+        source_id = row.get("source_backtest_run_id")
+        source = self._research_service.get_run(str(source_id))["run"] if source_id and self._research_service is not None else None
+        if row["status"] in {"COMPLETED", "PARTIAL"}:
+            payload["stage"], payload["progressPct"] = "COMPLETED", 100
+        elif row["status"] == "FAILED":
+            payload["stage"], payload["progressPct"] = "FAILED", None
+        elif source and source["status"] == "COMPLETED":
+            payload["stage"], payload["progressPct"] = "BUILDING_CASES", 90
+        elif source:
+            payload["stage"] = "REPLAYING_HISTORY"
+            last = source.get("lastCompletedSession")
+            from_date, to_date = row["requested_from_date"], row["requested_to_date"]
+            payload["progressPct"] = min(89, max(0, round(90 * (_date(last) - from_date).days / max(1, (to_date - from_date).days)))) if last else 0
+        else:
+            payload["stage"], payload["progressPct"] = "PREPARING_HISTORY", 0
+        payload["sessionsProcessed"] = source.get("sessionsProcessed", 0) if source else 0
+        payload["lastCompletedSession"] = source.get("lastCompletedSession") if source else None
+        payload["sourceEntriesRecorded"] = source.get("entriesRecorded", 0) if source else 0
         payload["caseStudyIds"] = self._repository.list_case_ids(run_id)
         return {"run": payload}
+
+    def latest(self, requested_by):
+        run_id = self._repository.latest_run_id(requested_by)
+        return self.get(run_id) if run_id else {"run": None}
 
     def items(self, run_id, query):
         if self._repository.get_run(run_id) is None: raise LookupError("Case-study run not found")
@@ -192,7 +223,8 @@ def _eligible(row, run):
     detected = _date(candidate.get("trigger_date") or candidate.get("detected_date") or row["entry_date"])
     timeframe = str(candidate.get("timeframe") or "1D")
     direction = str(candidate.get("direction") or "BULLISH").upper()
-    return row.get("state") in ACTIVE_ENTRY_STATES and direction in TRADE_DIRECTIONS and run["requested_from_date"] <= detected <= run["requested_to_date"] and timeframe in set(run["requested_timeframes"]) and (not run["requested_pattern_types"] or row["pattern_type"] in set(run["requested_pattern_types"]))
+    requested_types = set(run.get("requested_pattern_types") or SETUP_PATTERN_TYPES)
+    return row.get("state") in ACTIVE_ENTRY_STATES and direction in TRADE_DIRECTIONS and run["requested_from_date"] <= detected <= run["requested_to_date"] and timeframe in set(run["requested_timeframes"]) and row["pattern_type"] in set(SETUP_PATTERN_TYPES) and row["pattern_type"] in requested_types
 
 def _case_values(run_id, run, selected):
     source, candidate, fingerprint, trade = selected["source"], selected["candidate"], selected["fingerprint"], selected["trade"]

@@ -84,6 +84,25 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertNotIn("reversal", [item["patternInstanceId"] for item in setups["items"]])
         self.assertIn("reversal", [item["patternInstanceId"] for item in scanner["items"]])
 
+    def test_setups_and_top_setups_exclude_indices_and_non_eq_series(self):
+        index = _pattern("index", "READY", "99")
+        index["isin"] = "INDEX0000001"
+        be_security = _pattern("be", "READY", "98")
+        be_security["isin"] = "INE000000003"
+        self.repository.patterns.extend((index, be_security))
+        self.repository.securities[index["isin"]] = {"isin": index["isin"], "symbol": "NIFTY 50", "series": "INDEX"}
+        self.repository.securities[be_security["isin"]] = {"isin": be_security["isin"], "symbol": "OTHER", "series": "BE"}
+
+        setups = self.service.setups({"pageSize": ["10"]})
+        overview = self.service.overview({"top": ["10"]})
+        scanner = self.service.pattern_scanner({"pageSize": ["10"]})
+
+        self.assertEqual(["p2"], [item["patternInstanceId"] for item in setups["items"]])
+        self.assertEqual(1, setups["totalCount"])
+        self.assertEqual(2, next(item["count"] for item in setups["facets"]["patternTypes"] if item["value"] == "BASE-VCP"))
+        self.assertEqual(["p2"], [item["patternInstanceId"] for item in overview["topSetups"]])
+        self.assertEqual(3, len(scanner["items"]))
+
     def test_best_fit_ranks_each_active_lifecycle_state_with_explanations(self):
         payload = browser_payload(self.service.setups({"pageSize": ["10"]}))
 
@@ -245,8 +264,12 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
         self.assertIn("p.timeframe = '1D'", statement)
         self.assertIn("COUNT(DISTINCT p.isin)", statement)
         self.assertIn("FROM index_daily_bars", statement)
-        self.assertIn("f.distance_to_52_week_high_pct >= 0", statement)
+        self.assertIn("distance_to_52_week_high_pct >= 0", statement)
         self.assertNotIn("AVG(p.context_score)", statement)
+        self.assertIn("active_counts AS", statement)
+        self.assertIn("failed_counts AS", statement)
+        self.assertIn("feature_breadth AS", statement)
+        self.assertNotIn("LEFT JOIN pattern_instances failed", statement)
 
     def test_active_setup_ranking_happens_before_feature_lookups(self):
         repository = CapturingPatternQueryRepository()
@@ -262,6 +285,20 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
         self.assertIn("best_fit_score", statement)
         self.assertIn("COUNT(*) OVER () AS total_count", statement)
         self.assertLess(statement.index("selected_setups AS"), statement.index("LEFT JOIN LATERAL"))
+
+    def test_equity_scope_is_applied_before_ranking_in_both_sql_paths(self):
+        repository = CapturingPatternQueryRepository()
+        filters = _default_filters(_DATE)
+        filters["equities_only"] = True
+        for sort in ("setupScore", "distanceToPivotPct"):
+            filters["sort"] = sort
+            repository.list_setups(filters, 25, 0)
+            statement = repository.statements[-1]
+            self.assertIn("eligible.series = 'EQ'", statement)
+            self.assertLess(statement.index("eligible.series = 'EQ'"), statement.index("best_fit_pool AS"))
+
+        repository.setup_facets(_DATE, equities_only=True)
+        self.assertTrue(all("eligible.series = 'EQ'" in statement for statement in repository.statements[-6:]))
 
     def test_overview_indexes_are_an_append_only_migration(self):
         migration = (

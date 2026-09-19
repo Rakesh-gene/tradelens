@@ -14,7 +14,11 @@ const watchlistItem = {
   distanceTo52WeekHighPct: -4, relativeStrength1m: 2, relativeStrength3m: 8,
   relativeStrength6m: 12, relativeStrength12m: 18, relativeStrengthPercentile: 92,
   trend: { aboveEma20: true, aboveSma50: true, aboveSma200: true },
-  sectorContext: { relativeStrength: 5 }, rotation: { strength: 8, momentum: 1.5, zone: 'LEADING' },
+  sectorContext: { relativeStrength: 5 }, rotation: { strength: 8, momentum: 1.5, zone: 'LEADING', trail: [
+    { date: '2026-09-05', strength: 6, momentum: 0.5 }, { date: '2026-09-08', strength: 7, momentum: 1 },
+    { date: '2026-09-09', strength: 8, momentum: 1.5 }, { date: '2026-09-10', strength: 8, momentum: 1.2 },
+    { date: '2026-09-11', strength: 8, momentum: 1.5 },
+  ] },
   primarySetup: { patternInstanceId: '00000000-0000-4000-8000-000000000001', patternType: 'BASE-VCP', variant: 'VCP-3C', state: 'READY', setupScore: 84, pivotPrice: 100, supportPrice: 92, invalidationPrice: 89, distanceToPivotPct: -2 },
 }
 
@@ -46,7 +50,7 @@ describe('WatchlistPage', () => {
     expect(screen.getByText('Sector RS')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Recent activity' })).toBeTruthy()
     expect(screen.getByText(/MATURE → READY/)).toBeTruthy()
-    expect(screen.getByText(/IMPROVING → LEADING/)).toBeTruthy()
+    expect(screen.getByText(/Improving → Leading/)).toBeTruthy()
   })
 
   it('reloads when the app reports a watchlist change', async () => {
@@ -80,14 +84,16 @@ describe('WatchlistPage', () => {
     expect(screen.getByRole('button', { name: /RELIANCE: Leading/ })).toBeTruthy()
   })
 
-  it('shows watchlist stocks in a navigable quadrant view', async () => {
+  it('shows each stock’s five-session path and keeps the latest point navigable', async () => {
     const navigate = vi.fn()
     window.history.replaceState({}, '', '/watchlist?view=quadrant')
     render(<WatchlistPage onNavigate={navigate} onUnauthorized={vi.fn()} />)
 
     expect((await screen.findByRole('button', { name: /Quadrant/ })).getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelectorAll('.watchlist-quadrant__trail')).toHaveLength(1)
+    expect(screen.getByText('5-session path')).toBeTruthy()
     const point = screen.getByRole('button', { name: /RELIANCE: Leading/ })
     await userEvent.click(point)
-    expect(navigate).toHaveBeenCalledWith('/securities/INE002A01018')
+    expect(navigate).toHaveBeenCalledWith('/securities/RELIANCE')
   })
 })

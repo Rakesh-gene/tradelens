@@ -5,6 +5,7 @@ import useDocumentTitle from '../hooks/useDocumentTitle.js'
 import { EmptyState, ResourceState } from '../components/ResourceStates.jsx'
 import { PageIntro, StateBadge } from '../components/PatternUi.jsx'
 import NavigationLink from '../components/NavigationLink.jsx'
+import RotationQuadrant, { ROTATION_ZONE_LABELS } from '../components/RotationQuadrant.jsx'
 import { buildPatternPath, buildSecurityPath } from '../routing/routes.js'
 import { formatMarketDate, formatNumber, formatPercent, formatPrice, formatScore, labelize } from '../utils/formatters.js'
 import { normalizeWatchlistView, readWatchlistView, saveWatchlistView } from '../watchlistPreferences.js'
@@ -26,7 +27,7 @@ function WatchlistCard({ item, onNavigate, onRemove, removing }) {
   const setup = item.primarySetup
   return <article className="watchlist-card">
     <header className="watchlist-card__head">
-      <div><NavigationLink to={buildSecurityPath(item.security.isin)} onNavigate={onNavigate}><h3>{item.security.symbol || item.security.isin}</h3></NavigationLink><p>{item.security.name}</p><small>{item.security.sectorName || 'Sector unavailable'}</small></div>
+      <div><NavigationLink to={buildSecurityPath(item.security.symbol)} onNavigate={onNavigate}><h3>{item.security.symbol}</h3></NavigationLink><p>{item.security.name}</p><small>{item.security.sectorName || 'Sector unavailable'}</small></div>
       {setup && <StateBadge state={setup.state} />}
     </header>
     <div className="watchlist-price"><div><small>Last close</small><strong>{formatPrice(item.lastClose)}</strong></div><span className={Number(item.dailyChangePct) >= 0 ? 'is-positive' : 'is-negative'}>{formatPercent(item.dailyChangePct, { signed: true })} today</span></div>
@@ -48,7 +49,7 @@ function WatchlistRow({ item, onNavigate, onRemove, removing }) {
   const knownTrends = Object.values(item.trend || {}).filter((value) => value != null)
   const aboveTrends = knownTrends.filter(Boolean).length
   return <article className="watchlist-row" role="listitem">
-    <div className="watchlist-row__security"><NavigationLink to={buildSecurityPath(item.security.isin)} onNavigate={onNavigate}>{item.security.symbol || item.security.isin}</NavigationLink><span>{item.security.name}</span><small>{item.security.sectorName || 'Sector unavailable'}</small></div>
+    <div className="watchlist-row__security"><NavigationLink to={buildSecurityPath(item.security.symbol)} onNavigate={onNavigate}>{item.security.symbol}</NavigationLink><span>{item.security.name}</span><small>{item.security.sectorName || 'Sector unavailable'}</small></div>
     <div className="watchlist-row__metric"><small>Last close</small><strong>{formatPrice(item.lastClose)}</strong><span className={Number(item.dailyChangePct) >= 0 ? 'is-positive' : 'is-negative'}>{formatPercent(item.dailyChangePct, { signed: true })}</span></div>
     <div className="watchlist-row__metric"><small>Trend</small><strong>{knownTrends.length ? `${aboveTrends}/${knownTrends.length} above` : 'Unavailable'}</strong><span>EMA20 · SMA50 · SMA200</span></div>
     <div className="watchlist-row__metric"><small>3M stock RS</small><strong>{formatPercent(item.relativeStrength3m, { signed: true })}</strong><span>Percentile {formatNumber(item.relativeStrengthPercentile)}</span></div>
@@ -66,36 +67,13 @@ function ViewSwitch({ view, onChange }) {
   </div>
 }
 
-const ZONE_LABELS = { LEADING: 'Leading', WEAKENING: 'Weakening', LAGGING: 'Lagging', IMPROVING: 'Improving', UNAVAILABLE: 'Insufficient history' }
-
-function WatchlistQuadrant({ items, onNavigate }) {
-  const plotted = items.filter((item) => item.rotation?.strength != null && item.rotation?.momentum != null)
-  const xMax = Math.max(1, ...plotted.map((item) => Math.abs(Number(item.rotation.strength)))) * 1.15
-  const yMax = Math.max(1, ...plotted.map((item) => Math.abs(Number(item.rotation.momentum)))) * 1.15
-  return <section className="watchlist-quadrant" aria-labelledby="watchlist-quadrant-title">
-    <header><div><h2 id="watchlist-quadrant-title">Watchlist rotation</h2><p>Compare the direction and pace of benchmark-relative strength across your stocks.</p></div><span>{plotted.length}/{items.length} plotted</span></header>
-    {plotted.length ? <>
-      <div className="rotation-axis-title">↑ RS momentum proxy (pp): accelerating above zero</div>
-      <div className="rotation-plot" role="group" aria-label="Watchlist stock relative strength quadrants">
-        <div className="rotation-zone rotation-zone--improving">Improving</div><div className="rotation-zone rotation-zone--leading">Leading</div>
-        <div className="rotation-zone rotation-zone--lagging">Lagging</div><div className="rotation-zone rotation-zone--weakening">Weakening</div><span className="rotation-origin">0</span>
-        {plotted.map((item, index) => <button key={item.security.isin} className="rotation-point watchlist-quadrant__point" style={{ left: `${50 + Number(item.rotation.strength) / xMax * 44}%`, top: `${50 - Number(item.rotation.momentum) / yMax * 44}%` }} onClick={() => onNavigate(buildSecurityPath(item.security.isin))} aria-label={`${item.security.symbol}: ${ZONE_LABELS[item.rotation.zone]}, 3-month RS ${formatNumber(item.rotation.strength)} percentage points, momentum ${formatNumber(item.rotation.momentum)} percentage points`} title={`${item.security.symbol}: ${ZONE_LABELS[item.rotation.zone]}`}>{index + 1}</button>)}
-      </div>
-      <div className="rotation-mobile" aria-label="Watchlist stock zones on mobile">{['IMPROVING', 'LEADING', 'LAGGING', 'WEAKENING'].map((zone) => <section className={`rotation-mobile-zone rotation-zone--${zone.toLowerCase()}`} key={zone}><h3>{ZONE_LABELS[zone]}</h3>{plotted.filter((item) => item.rotation.zone === zone).map((item) => <button className="secondary-button" key={item.security.isin} onClick={() => onNavigate(buildSecurityPath(item.security.isin))}>{item.security.symbol}<small>{formatPercent(item.rotation.strength, { signed: true })}</small></button>)}</section>)}</div>
-      <div className="rotation-axis-title">3-month relative strength (pp) →</div>
-      <div className="watchlist-quadrant__legend" role="list" aria-label="Watchlist quadrant values">{plotted.map((item, index) => <div role="listitem" key={item.security.isin}><button onClick={() => onNavigate(buildSecurityPath(item.security.isin))}><span>{index + 1}</span><strong>{item.security.symbol}</strong><span>{ZONE_LABELS[item.rotation.zone]}</span><span>{formatNumber(item.rotation.strength)} pp RS</span><span>{formatNumber(item.rotation.momentum)} pp momentum</span></button></div>)}</div>
-    </> : <p className="muted-copy">At least one month of benchmark-relative history is required before a stock can be plotted.</p>}
-    <details><summary>How the quadrant is calculated</summary><p>X is 3-month benchmark-relative return. Y is 1-month RS minus one-third of 3-month RS. Zero divides each axis. This is a momentum proxy and ranking aid, not a forecast or trade recommendation.</p></details>
-  </section>
-}
-
 function ActivityFeed({ activity, onNavigate }) {
   return <aside className="watchlist-activity" aria-labelledby="watchlist-activity-title"><div><p className="eyebrow">Change feed</p><h2 id="watchlist-activity-title">Recent activity</h2></div>
     {activity.length ? <ol>{activity.map((event) => <li key={event.eventId}>
       <time dateTime={event.effectiveDate}>{formatMarketDate(event.effectiveDate)}</time>
-      <NavigationLink to={buildSecurityPath(event.security.isin)} onNavigate={onNavigate}>{event.security.symbol || event.security.isin}</NavigationLink>
+      <NavigationLink to={buildSecurityPath(event.security.symbol)} onNavigate={onNavigate}>{event.security.symbol}</NavigationLink>
       {event.activityType === 'QUADRANT' ? <>
-        <p>{event.eventType === 'QUADRANT_ENTERED' ? `Entered ${labelize(event.newZone)} quadrant` : event.eventType === 'QUADRANT_LEFT' ? `Left ${labelize(event.previousZone)} quadrant` : `${labelize(event.previousZone)} → ${labelize(event.newZone)}`}</p>
+        <p>{event.eventType === 'QUADRANT_ENTERED' ? `Entered ${ROTATION_ZONE_LABELS[event.newZone] || labelize(event.newZone)} quadrant` : event.eventType === 'QUADRANT_LEFT' ? `Left ${ROTATION_ZONE_LABELS[event.previousZone] || labelize(event.previousZone)} quadrant` : `${ROTATION_ZONE_LABELS[event.previousZone] || labelize(event.previousZone)} → ${ROTATION_ZONE_LABELS[event.newZone] || labelize(event.newZone)}`}</p>
         <small>3M RS {formatNumber(event.strength)} pp · Momentum {formatNumber(event.momentum)} pp</small>
       </> : <><p>{labelize(event.eventType)} · {event.previousState ? `${labelize(event.previousState)} → ` : ''}{labelize(event.newState)}</p><small>{event.variant || event.patternType}</small></>}
     </li>)}</ol> : <p className="muted-copy">Pattern and quadrant changes for watched stocks will appear after the next completed scan.</p>}
@@ -133,7 +111,7 @@ export default function WatchlistPage({ onNavigate, onUnauthorized, revision = 0
     {error && <p className="status-banner" role="alert">{error}</p>}
     <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
       {data && (data.items.length ? <div className="watchlist-layout"><main className="watchlist-groups">
-        {view === 'quadrant' ? <WatchlistQuadrant items={data.items} onNavigate={onNavigate} /> : data.groups.filter((group) => group.count).map((group) => <section key={group.id} className={`watchlist-group watchlist-group--${group.id.toLowerCase().replaceAll('_', '-')}`}><header><div><h2>{GROUP_COPY[group.id]?.[0] || labelize(group.id)}</h2><p>{GROUP_COPY[group.id]?.[1]}</p></div><span>{group.count}</span></header><div className={view === 'list' ? 'watchlist-list' : 'watchlist-grid'} role={view === 'list' ? 'list' : undefined}>{group.items.map((item) => view === 'list' ? <WatchlistRow key={item.security.isin} item={item} onNavigate={onNavigate} onRemove={remove} removing={removing === item.security.isin} /> : <WatchlistCard key={item.security.isin} item={item} onNavigate={onNavigate} onRemove={remove} removing={removing === item.security.isin} />)}</div></section>)}
+        {view === 'quadrant' ? <RotationQuadrant title="Watchlist rotation" description="Five-session paths show how each stock’s relative strength has progressed." items={data.items} itemId={(item) => item.security.isin} itemLabel={(item) => item.security.symbol} onOpen={(item) => onNavigate(buildSecurityPath(item.security.symbol))} emptyMessage="At least one month of benchmark-relative history is required before a stock can be plotted." ariaLabel="Watchlist stock relative strength quadrants" /> : data.groups.filter((group) => group.count).map((group) => <section key={group.id} className={`watchlist-group watchlist-group--${group.id.toLowerCase().replaceAll('_', '-')}`}><header><div><h2>{GROUP_COPY[group.id]?.[0] || labelize(group.id)}</h2><p>{GROUP_COPY[group.id]?.[1]}</p></div><span>{group.count}</span></header><div className={view === 'list' ? 'watchlist-list' : 'watchlist-grid'} role={view === 'list' ? 'list' : undefined}>{group.items.map((item) => view === 'list' ? <WatchlistRow key={item.security.isin} item={item} onNavigate={onNavigate} onRemove={remove} removing={removing === item.security.isin} /> : <WatchlistCard key={item.security.isin} item={item} onNavigate={onNavigate} onRemove={remove} removing={removing === item.security.isin} />)}</div></section>)}
       </main><ActivityFeed activity={data.activity || []} onNavigate={onNavigate} /></div> : <EmptyState title="Your watchlist is empty" message="Open a stock from search, setups, or sector rotation and add it to your watchlist." />)}
     </ResourceState>
   </>

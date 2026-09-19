@@ -32,6 +32,15 @@ class PostgresIndexRepository:
                         name, code""", ()
         )
 
+    def index_by_code(self, code: str) -> dict[str, object] | None:
+        rows = self._fetch_all(
+            """SELECT code, name, engine_isin
+               FROM market_indices
+               WHERE code = %s AND is_enabled AND engine_isin IS NOT NULL""",
+            (code,),
+        )
+        return rows[0] if rows else None
+
     def sync_bars_to_engine(self, index_code: str, engine_isin: str, from_date: date, to_date: date) -> int:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -65,7 +74,8 @@ class PostgresIndexRepository:
                       feature.relative_strength_6m, feature.relative_strength_12m,
                       pattern.id AS pattern_id, pattern.pattern_type, pattern.variant,
                       pattern.state, pattern.setup_score, pattern.pivot_price,
-                      pattern.support_price, pattern.invalidation_price
+                      pattern.support_price, pattern.invalidation_price,
+                      rotation_history.points AS rotation_history
                FROM market_indices index
                LEFT JOIN LATERAL (
                  SELECT current.trading_date, current.close_price,
@@ -81,6 +91,26 @@ class PostgresIndexRepository:
                  WHERE isin = index.engine_isin
                  ORDER BY trading_date DESC, generated_at DESC LIMIT 1
                ) feature ON TRUE
+               LEFT JOIN LATERAL (
+                 SELECT jsonb_agg(
+                            jsonb_build_object(
+                                'date', historical.trading_date,
+                                'strength', historical.relative_strength_3m,
+                                'momentum', historical.relative_strength_1m - historical.relative_strength_3m / 3.0
+                            ) ORDER BY historical.trading_date
+                        ) AS points
+                 FROM (
+                   SELECT DISTINCT ON (features.trading_date)
+                          features.trading_date, features.relative_strength_1m,
+                          features.relative_strength_3m
+                   FROM technical_features features
+                   WHERE features.isin = index.engine_isin
+                   ORDER BY features.trading_date DESC, features.generated_at DESC, features.feature_version DESC
+                   LIMIT 5
+                 ) historical
+                 WHERE historical.relative_strength_1m IS NOT NULL
+                   AND historical.relative_strength_3m IS NOT NULL
+               ) rotation_history ON TRUE
                LEFT JOIN LATERAL (
                  SELECT id, pattern_type, variant, state, setup_score,
                         pivot_price, support_price, invalidation_price, engine_version
@@ -203,6 +233,9 @@ class InMemoryIndexRepository:
         self.quadrant_state = {}
 
     def list_enabled(self): return [dict(row) for row in self.rows]
+    def index_by_code(self, code):
+        row = next((item for item in self.rows if item.get("code") == code and item.get("engine_isin")), None)
+        return None if row is None else dict(row)
     def overview_rows(self): return [dict(row) for row in self.rows]
     def sync_bars_to_engine(self, index_code, engine_isin, from_date, to_date): return 0
     def list_recent_events(self, limit): return [dict(row) for row in self.events[:limit]]

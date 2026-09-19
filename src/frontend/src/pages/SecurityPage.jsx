@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { getSecurityChart, getSecurityFingerprint } from '../api/securityApi.js'
+import { getSecurityChart, getSecurityFingerprint, resolveIndexSecurity, resolveSecuritySymbol } from '../api/securityApi.js'
 import useApiResource from '../useApiResource.js'
 import { formatPrice } from '../utils/formatters.js'
 import {
@@ -27,17 +27,25 @@ function SupportingEvidence({ title, items }) {
   </article>
 }
 
-export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
-  useDocumentTitle('Security fingerprint')
+export default function SecurityPage({ symbol, indexCode, onNavigate, onUnauthorized }) {
+  useDocumentTitle(indexCode ? 'Index overview' : 'Security fingerprint')
   const [chartRange, setChartRange] = useState('6m')
   const resource = useApiResource(
-    `${isin}:${chartRange}`,
+    `${indexCode ? `index:${indexCode}` : symbol}:${chartRange}`,
     async (signal) => {
+      const identity = indexCode
+        ? await resolveIndexSecurity(indexCode, { signal, onUnauthorized })
+        : await resolveSecuritySymbol(symbol, { signal, onUnauthorized })
       const [fingerprint, chart] = await Promise.all([
-        getSecurityFingerprint(isin, { signal, onUnauthorized }),
-        getSecurityChart(isin, { range: chartRange }, { signal, onUnauthorized }),
+        getSecurityFingerprint(identity.isin, { signal, onUnauthorized }),
+        getSecurityChart(identity.isin, { range: chartRange }, { signal, onUnauthorized }),
       ])
-      return { fingerprint, chart }
+      return {
+        fingerprint: indexCode
+          ? { ...fingerprint, security: { ...fingerprint.security, symbol: identity.symbol, name: identity.name } }
+          : fingerprint,
+        chart,
+      }
     },
   )
 
@@ -72,12 +80,12 @@ export default function SecurityPage({ isin, onNavigate, onUnauthorized }) {
       }
       return <>
         <PageIntro
-          eyebrow="Stock overview"
+          eyebrow={indexCode ? 'Index overview' : 'Stock overview'}
           title={fingerprint.security.symbol || fingerprint.security.isin}
           description={`${fingerprint.security.name || 'NSE security'}${fingerprint.security.sectorName ? ` · ${fingerprint.security.sectorName}` : ''}. Review its trend, price levels, relative strength, and active patterns.`}
           date={fingerprint.dataAsOf}
         />
-        <WatchlistButton isin={isin} onUnauthorized={onUnauthorized} />
+        {!indexCode && <WatchlistButton isin={fingerprint.security.isin} onUnauthorized={onUnauthorized} />}
 
         {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>Current operating view</h2></div><StateBadge state={primary.state} /></div><DecisionSummary decision={primary.decision} /></section>}
 

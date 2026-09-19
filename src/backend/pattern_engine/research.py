@@ -69,7 +69,7 @@ class BacktestService:
         self._evaluator = evaluator
         self._configuration_version = configuration_version
 
-    def start(self, payload: Mapping[str, object], requested_by: str | None = None, *, resumed_from_run_id: str | None = None):
+    def start(self, payload: Mapping[str, object], requested_by: str | None = None, *, resumed_from_run_id: str | None = None, on_run_created=None):
         started = perf_counter()
         request = _request(payload)
         if self._evaluator is None:
@@ -100,6 +100,8 @@ class BacktestService:
             },
             "resumed_from_run_id": resumed_from_run_id,
         })
+        if on_run_created is not None:
+            on_run_created(run_id)
         self._repository.update_run(run_id, "RUNNING", started_at=datetime.now(timezone.utc))
         sessions_processed = securities_evaluated = entries_recorded = 0
         seen = set()

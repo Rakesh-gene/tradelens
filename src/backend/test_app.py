@@ -444,6 +444,42 @@ class ApiTestCase(unittest.TestCase):
         with urlopen(Request(f"{self.base_url}/api/case-studies/facets", headers=headers)) as response:
             self.assertIn("patternTypes", json.load(response)["facets"])
 
+    def test_admin_can_delete_case_study_and_non_admin_cannot(self) -> None:
+        case_id = "00000000-0000-0000-0000-000000000888"
+        sample = dict(self.case_study_repository.cases[0])
+        sample["id"] = case_id
+        self.case_study_repository.cases.append(sample)
+        self.repository.create_user("case-delete-member@example.com", "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f")
+        member_login = Request(f"{self.base_url}/api/login", method="POST", data=json.dumps({"email": "case-delete-member@example.com", "password": "password123"}).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(member_login) as response: member_token = json.load(response)["accessToken"]
+        blocked = Request(f"{self.base_url}/api/admin/case-studies/{case_id}", method="DELETE", headers={"Authorization": f"Bearer {member_token}"})
+        with self.assertRaises(HTTPError) as context: urlopen(blocked)
+        self.assertEqual(403, context.exception.code)
+        admin = self.repository.create_user("case-delete-admin@example.com", "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f")
+        admin["is_admin"] = True
+        admin_login = Request(f"{self.base_url}/api/login", method="POST", data=json.dumps({"email": "case-delete-admin@example.com", "password": "password123"}).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(admin_login) as response: admin_token = json.load(response)["accessToken"]
+        delete = Request(f"{self.base_url}/api/admin/case-studies/{case_id}", method="DELETE", headers={"Authorization": f"Bearer {admin_token}"})
+        with urlopen(delete) as response: self.assertEqual(case_id, json.load(response)["deletedCaseStudyId"])
+        with self.assertRaises(HTTPError) as context: urlopen(Request(f"{self.base_url}/api/case-studies/{case_id}", headers={"Authorization": f"Bearer {admin_token}"}))
+        self.assertEqual(404, context.exception.code)
+
+    def test_latest_case_study_run_requires_admin(self) -> None:
+        self.repository.create_user("case-run-member@example.com", "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f")
+        member_login = Request(f"{self.base_url}/api/login", method="POST", data=json.dumps({"email": "case-run-member@example.com", "password": "password123"}).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(member_login) as response: member_token = json.load(response)["accessToken"]
+        latest_url = f"{self.base_url}/api/admin/case-study-runs/latest"
+        with self.assertRaises(HTTPError) as context:
+            urlopen(Request(latest_url, headers={"Authorization": f"Bearer {member_token}"}))
+        self.assertEqual(403, context.exception.code)
+
+        admin = self.repository.create_user("case-run-admin@example.com", "ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f")
+        admin["is_admin"] = True
+        admin_login = Request(f"{self.base_url}/api/login", method="POST", data=json.dumps({"email": "case-run-admin@example.com", "password": "password123"}).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(admin_login) as response: admin_token = json.load(response)["accessToken"]
+        with urlopen(Request(latest_url, headers={"Authorization": f"Bearer {admin_token}"})) as response:
+            self.assertIn("run", json.load(response))
+
 
 if __name__ == "__main__":
     unittest.main()

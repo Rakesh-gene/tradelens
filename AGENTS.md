@@ -452,7 +452,7 @@ change.
 ### Client routes and navigation
 
 The normal route set is `/`, `/signup`, `/overview`, `/sector-rotation`, `/setups`,
-`/patterns/:patternId`, `/securities/:isin`, `/research`, and
+`/patterns/:patternId`, `/securities/:symbol`, `/research`, and
 `/research/:runId` for shareable historical results.
 
 - Preserve the small History API router. Put dynamic matching and path builders
@@ -465,6 +465,9 @@ The normal route set is `/`, `/signup`, `/overview`, `/sector-rotation`, `/setup
   sign-out, and authentication failure.
 - Unknown routes render a not-found page. Validate dynamic IDs before calling
   the API.
+- Public security routes use the uppercase NSE symbol and never expose an
+  equity ISIN. `SecurityPage` resolves that symbol before calling the stable
+  ISIN-keyed backend APIs. ISIN remains the persistence and API identity.
 
 ### Client API and asynchronous state
 

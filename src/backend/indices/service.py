@@ -95,13 +95,25 @@ class IndexQueryService:
             "methodology": "Index patterns use the same versioned daily, weekly and monthly detector pipeline as equities. Relative strength is measured against NIFTY 500. Quadrant X is 3-month RS; Y is 1-month RS minus one-third of 3-month RS.",
         }
 
+    def resolve_security(self, code: str):
+        normalized = str(code or "").strip().upper()
+        if not normalized:
+            raise ValueError("An index code is required")
+        row = self._repository.index_by_code(normalized)
+        if row is None:
+            raise LookupError("Index not found")
+        return {
+            "isin": row["engine_isin"],
+            "symbol": row["code"],
+            "name": row["name"],
+        }
+
     @staticmethod
     def _event(row):
         base = {
             "eventId": row.get("event_id"), "activityType": row.get("activity_type"),
             "eventType": row.get("event_type"), "effectiveDate": row.get("effective_date"),
-            "index": {"code": row.get("index_code"), "name": row.get("index_name"),
-                      "engineSecurityId": row.get("engine_isin")},
+            "index": {"code": row.get("index_code"), "name": row.get("index_name")},
         }
         if row.get("activity_type") == "QUADRANT":
             return {**base, "previousZone": row.get("previous_state"),
@@ -122,11 +134,14 @@ class IndexQueryService:
         change = None if close is None or previous in (None, 0) else (float(close) - float(previous)) / float(previous) * 100
         rs1, rs3 = row.get("relative_strength_1m"), row.get("relative_strength_3m")
         momentum = None if rs1 is None or rs3 is None else float(rs1) - float(rs3) / 3
+        rotation_trail = _rotation_trail(row.get("rotation_history"))
+        if not rotation_trail and rs3 is not None and momentum is not None:
+            rotation_trail = [{"date": row.get("data_as_of"), "strength": rs3, "momentum": momentum}]
         pivot = row.get("pivot_price")
         distance = None if close is None or pivot in (None, 0) else (float(close) - float(pivot)) / float(pivot) * 100
         return {
             "code": row.get("code"), "name": row.get("name"), "category": row.get("category"),
-            "engineSecurityId": row.get("engine_isin"), "dataAsOf": row.get("data_as_of"),
+            "dataAsOf": row.get("data_as_of"),
             "lastClose": close, "dailyChangePct": change,
             "trend": {"aboveEma20": _above(close, row.get("ema_20")),
                       "aboveSma50": _above(close, row.get("sma_50")),
@@ -136,7 +151,7 @@ class IndexQueryService:
             "relativeStrength12m": row.get("relative_strength_12m"),
             "distanceTo52WeekHighPct": row.get("distance_to_52_week_high_pct"),
             "rotation": {"strength": rs3, "momentum": momentum, "zone": zone(rs3, momentum),
-                         "methodologyVersion": VERSION},
+                         "methodologyVersion": VERSION, "trail": rotation_trail},
             "primarySetup": None if not row.get("pattern_id") else {
                 "patternInstanceId": row.get("pattern_id"), "patternType": row.get("pattern_type"),
                 "variant": row.get("variant"), "state": row.get("state"),
@@ -149,3 +164,13 @@ class IndexQueryService:
 
 def _above(price, average):
     return None if price is None or average is None else float(price) >= float(average)
+
+
+def _rotation_trail(value):
+    if not isinstance(value, list):
+        return []
+    return [
+        {"date": point.get("date"), "strength": point["strength"], "momentum": point["momentum"]}
+        for point in value[-5:]
+        if isinstance(point, dict) and point.get("strength") is not None and point.get("momentum") is not None
+    ]

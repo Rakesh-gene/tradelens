@@ -4,6 +4,7 @@ import useApiResource from '../useApiResource.js'
 import { PageIntro, ResourceState, StateBadge } from '../components/PatternUi.jsx'
 import { formatMarketDate } from '../utils/formatters.js'
 import useDocumentTitle from '../hooks/useDocumentTitle.js'
+import { buildSecurityPath } from '../routing/routes.js'
 
 const TERMINAL = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'PAUSED', 'TERMINATED', 'CANCELLED'])
 const TIMEFRAMES = ['1D', '1W', '1M']
@@ -184,7 +185,7 @@ function PipelineRunStatus({ run, controlling, onControl, onNavigate, onItemPage
       {canTerminate && <button className="secondary-button" type="button" disabled={Boolean(controlling)} onClick={() => onControl('terminate')}>{controlling === 'terminate' ? 'Terminating…' : 'Terminate run'}</button>}
     </div>
     {run.errorSummary && <p className="form-message error">{run.errorSummary}</p>}
-    <div className="admin-item-grid">{(run.items || []).map((item) => { const preparedItem = item.currentStage === 'SECTOR_CONTEXT'; return <article key={item.isin}><div><strong>{item.symbol}</strong><small>{item.isin}</small></div><StateBadge state={preparedItem ? 'PREPARED' : item.status} /><p>{preparedItem ? 'Waiting for universe sector context' : stageLabel(item.currentStage)}</p><dl><div><dt>Rows</dt><dd>{item.rowsDownloaded || 0}</dd></div><div><dt>Candidates</dt><dd>{item.candidatesDetected || 0}</dd></div></dl>{item.error && <small className="admin-item-error">{item.error}</small>}{item.status === 'COMPLETED' && <button type="button" className="text-button" onClick={() => onNavigate(`/securities/${item.isin}`)}>Inspect evidence -&gt;</button>}</article> })}</div>
+    <div className="admin-item-grid">{(run.items || []).map((item) => { const preparedItem = item.currentStage === 'SECTOR_CONTEXT'; return <article key={item.isin}><div><strong>{item.symbol}</strong><small>{item.isin}</small></div><StateBadge state={preparedItem ? 'PREPARED' : item.status} /><p>{preparedItem ? 'Waiting for universe sector context' : stageLabel(item.currentStage)}</p><dl><div><dt>Rows</dt><dd>{item.rowsDownloaded || 0}</dd></div><div><dt>Candidates</dt><dd>{item.candidatesDetected || 0}</dd></div></dl>{item.error && <small className="admin-item-error">{item.error}</small>}{item.status === 'COMPLETED' && item.symbol && <button type="button" className="text-button" onClick={() => onNavigate(buildSecurityPath(item.symbol))}>Inspect evidence -&gt;</button>}</article> })}</div>
     {Number(run.itemTotalPages || 0) > 1 && <div className="pagination admin-item-pagination"><button className="secondary-button" type="button" disabled={run.itemPage <= 1} onClick={() => onItemPage(run.itemPage - 1)}>Previous items</button><span>Items page {run.itemPage} of {run.itemTotalPages}</span><button className="secondary-button" type="button" disabled={run.itemPage >= run.itemTotalPages} onClick={() => onItemPage(run.itemPage + 1)}>Next items</button></div>}
   </section>
 }

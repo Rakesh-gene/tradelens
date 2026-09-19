@@ -48,6 +48,11 @@ class IndexServiceTestCase(unittest.TestCase):
             "engine_isin": "INIDX0000180", "data_as_of": date(2026, 9, 11),
             "last_close": Decimal("40000"), "previous_close": Decimal("39800"),
             "relative_strength_1m": Decimal("6"), "relative_strength_3m": Decimal("9"),
+            "rotation_history": [
+                {"date": date(2026, 9, 5), "strength": Decimal("5"), "momentum": Decimal("1")},
+                {"date": date(2026, 9, 8), "strength": Decimal("6"), "momentum": Decimal("2")},
+                {"date": date(2026, 9, 11), "strength": Decimal("9"), "momentum": Decimal("3")},
+            ],
             "pattern_id": "pattern-1", "pattern_type": "BASE-VCP", "state": "READY",
             "setup_score": Decimal("84"), "pivot_price": Decimal("40500"),
         }])
@@ -58,10 +63,20 @@ class IndexServiceTestCase(unittest.TestCase):
 
         self.assertEqual(1, payload["count"])
         self.assertEqual("LEADING", payload["items"][0]["rotation"]["zone"])
+        self.assertEqual(3, len(payload["items"][0]["rotation"]["trail"]))
+        self.assertEqual(date(2026, 9, 5), payload["items"][0]["rotation"]["trail"][0]["date"])
         self.assertEqual("pattern-1", payload["items"][0]["primarySetup"]["patternInstanceId"])
         self.assertEqual(1, next(group for group in payload["categories"] if group["id"] == "SECTORAL")["count"])
         self.assertEqual("QUADRANT_ENTERED", payload["activity"][0]["eventType"])
         self.assertEqual("NIFTY IT", payload["activity"][0]["index"]["name"])
+        self.assertNotIn("engineSecurityId", payload["items"][0])
+        self.assertNotIn("engineSecurityId", payload["activity"][0]["index"])
+        self.assertEqual(
+            {"isin": "INIDX0000180", "symbol": "NIFTY IT", "name": "NIFTY IT"},
+            service.resolve_security("nifty it"),
+        )
+        with self.assertRaises(LookupError):
+            service.resolve_security("unknown")
 
         repository.rows[0]["relative_strength_1m"] = Decimal("1")
         repository.rows[0]["data_as_of"] = date(2026, 9, 12)

@@ -86,6 +86,9 @@ class WatchlistService:
         rs1m = row.get("relative_strength_1m")
         rs3m = row.get("relative_strength_3m")
         momentum = None if rs1m is None or rs3m is None else float(rs1m) - float(rs3m) / 3
+        rotation_trail = WatchlistService._rotation_trail(row.get("rotation_history"))
+        if not rotation_trail and rs3m is not None and momentum is not None:
+            rotation_trail = [{"date": row.get("data_as_of"), "strength": rs3m, "momentum": momentum}]
         group = WatchlistService._attention_group(row, distance_to_pivot, trend)
         return {
             "security": {
@@ -112,6 +115,7 @@ class WatchlistService:
                 "strength": rs3m, "momentum": momentum,
                 "zone": zone(rs3m, momentum),
                 "methodologyVersion": "sector-rotation-v1",
+                "trail": rotation_trail,
             },
             "primarySetup": None if not row.get("pattern_id") else {
                 "patternInstanceId": row.get("pattern_id"), "patternClass": row.get("pattern_class"),
@@ -128,6 +132,21 @@ class WatchlistService:
         if price is None or average is None:
             return None
         return float(price) >= float(average)
+
+    @staticmethod
+    def _rotation_trail(value: object) -> list[dict[str, object]]:
+        """Return only usable, oldest-to-newest daily quadrant positions."""
+        if not isinstance(value, list):
+            return []
+        trail = []
+        for point in value[-5:]:
+            if not isinstance(point, dict):
+                continue
+            strength, momentum = point.get("strength"), point.get("momentum")
+            if strength is None or momentum is None:
+                continue
+            trail.append({"date": point.get("date"), "strength": strength, "momentum": momentum})
+        return trail
 
     @staticmethod
     def _attention_group(row: dict[str, object], distance_to_pivot: float | None, trend: dict[str, bool | None]) -> str:

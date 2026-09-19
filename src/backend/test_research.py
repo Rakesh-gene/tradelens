@@ -39,6 +39,14 @@ class FakeEvaluator:
 
 
 class HistoricalResearchTestCase(unittest.TestCase):
+    def test_reports_run_id_before_replay_starts(self):
+        repository = InMemoryResearchRepository(sessions=[])
+        service = BacktestService(repository, FakeEvaluator())
+        observed = []
+        service.start({"fromDate": "2026-01-01", "toDate": "2026-01-02", "universe": {"isin": "INE002A01018"}, "filters": {}, "versions": {"engine": "e", "configuration": "c", "feature": "f", "adjustment": "a"}}, on_run_created=lambda run_id: observed.append((run_id, repository.get_run(run_id)["status"])))
+        self.assertEqual(1, len(observed))
+        self.assertEqual("PENDING", observed[0][1])
+
     def test_outcomes_cover_horizons_excursions_thresholds_and_completeness(self):
         start = date(2026, 1, 1)
         bars = _bars("A", start)

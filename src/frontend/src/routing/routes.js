@@ -1,4 +1,4 @@
-import { isIsin, isUuid, safeDecodeSegment } from '../utils/guards.js'
+import { isIndexCode, isSecuritySlug, isUuid, safeDecodeSegment } from '../utils/guards.js'
 
 const STATIC_ROUTES = new Map([
   ['/', { name: 'login', protected: false }],
@@ -8,6 +8,7 @@ const STATIC_ROUTES = new Map([
   ['/setups', { name: 'setups', protected: true }],
   ['/watchlist', { name: 'watchlist', protected: true }],
   ['/indices', { name: 'indices', protected: true, entitlement: 'indices' }],
+  ['/guide', { name: 'guide', protected: true }],
   ['/profile', { name: 'profile', protected: true }],
   ['/case-studies', { name: 'case-studies', protected: true }],
   ['/admin/pipeline', { name: 'admin-pipeline', protected: true, admin: true }],
@@ -39,9 +40,17 @@ export function matchRoute(pathname) {
 
   const securityMatch = path.match(/^\/securities\/([^/]+)$/)
   if (securityMatch) {
-    const isin = safeDecodeSegment(securityMatch[1])?.toUpperCase()
-    return isin && isIsin(isin)
-      ? { name: 'security', protected: true, params: { isin } }
+    const symbol = safeDecodeSegment(securityMatch[1])?.toUpperCase()
+    return symbol && isSecuritySlug(symbol)
+      ? { name: 'security', protected: true, params: { symbol } }
+      : { name: 'not-found', protected: true, params: {} }
+  }
+
+  const indexMatch = path.match(/^\/indices\/([^/]+)$/)
+  if (indexMatch) {
+    const code = safeDecodeSegment(indexMatch[1])?.toUpperCase()
+    return code && isIndexCode(code)
+      ? { name: 'index-detail', protected: true, entitlement: 'indices', params: { code } }
       : { name: 'not-found', protected: true, params: {} }
   }
 
@@ -53,10 +62,16 @@ export function buildPatternPath(patternId) {
   return `/patterns/${encodeURIComponent(patternId)}`
 }
 
-export function buildSecurityPath(isin) {
-  const normalized = String(isin || '').toUpperCase()
-  if (!isIsin(normalized)) throw new TypeError('A valid ISIN is required.')
+export function buildSecurityPath(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!isSecuritySlug(normalized)) throw new TypeError('A valid security symbol is required.')
   return `/securities/${encodeURIComponent(normalized)}`
+}
+
+export function buildIndexPath(code) {
+  const normalized = String(code || '').trim().toUpperCase()
+  if (!isIndexCode(normalized)) throw new TypeError('A valid index code is required.')
+  return `/indices/${encodeURIComponent(normalized)}`
 }
 
 export function buildCaseStudyPath(caseStudyId) {

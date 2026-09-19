@@ -4,7 +4,7 @@ import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from auth.service import AuthService
 from pattern_engine.query_service import PatternQueryService, browser_payload
@@ -81,7 +81,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if user is None:
                 return
             try:
-                if path.startswith("/api/admin/case-study-runs/"):
+                if path == "/api/admin/case-study-runs/latest":
+                    payload = self.case_study_pipeline.latest(str(user["id"]))
+                elif path.startswith("/api/admin/case-study-runs/"):
                     parts = path.strip("/").split("/")
                     if len(parts) == 4:
                         payload = self.case_study_pipeline.get(parts[3])
@@ -188,6 +190,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             or len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"events", "chart"}
             or len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "fingerprint"
             or len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "chart"
+            or len(parts) == 4 and parts[:2] == ["api", "indices"] and parts[3] == "security"
             or len(parts) == 4 and parts[:3] == ["api", "research", "runs"]
             or len(parts) == 5 and parts[:3] == ["api", "research", "runs"] and parts[4] == "results"
         )
@@ -218,6 +221,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self.pattern_service.fingerprint(parts[2], query)
         if len(parts) == 4 and parts[:2] == ["api", "securities"] and parts[3] == "chart":
             return self.pattern_service.security_chart(parts[2], query)
+        if len(parts) == 4 and parts[:2] == ["api", "indices"] and parts[3] == "security":
+            return self.index_query_service.resolve_security(unquote(parts[2]))
         if len(parts) == 4 and parts[:3] == ["api", "research", "runs"]:
             return self.research_service.get_run(parts[3])
         if len(parts) == 5 and parts[:3] == ["api", "research", "runs"] and parts[4] == "results":
@@ -359,6 +364,20 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
         parts = path.strip("/").split("/")
+        if len(parts) == 4 and parts[:3] == ["api", "admin", "case-studies"]:
+            user = self._authorize_admin()
+            if user is None:
+                return
+            try:
+                result = self.case_study_service.delete(parts[3])
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            except LookupError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, result)
+            return
         if len(parts) != 3 or parts[:2] != ["api", "watchlist"]:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return

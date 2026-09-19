@@ -28,7 +28,7 @@ describe('SecuritySearch', () => {
     expect(screen.queryByText('INE002A01018')).toBeNull()
     expect(screen.queryByText('INE036A01016')).toBeNull()
     await userEvent.keyboard('{ArrowDown}{Enter}')
-    expect(navigate).toHaveBeenCalledWith('/securities/INE036A01016')
+    expect(navigate).toHaveBeenCalledWith('/securities/RELINFRA')
   })
 
   it('does not request blank or one-character input', async () => {

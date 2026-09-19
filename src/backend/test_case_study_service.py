@@ -28,3 +28,23 @@ class CaseStudyServiceTest(unittest.TestCase):
         reviewed = self.service.review(identifier, {"status": "REVIEWED"})
         self.assertEqual("REVIEWED", reviewed["caseStudy"]["reviewStatus"])
         self.assertEqual([], self.service.review_queue({"status": ["PENDING"]})["items"])
+
+    def test_admin_can_delete_a_case(self):
+        identifier = "00000000-0000-0000-0000-000000000001"
+        self.assertEqual(identifier, self.service.delete(identifier)["deletedCaseStudyId"])
+        with self.assertRaises(LookupError):
+            self.service.detail(identifier)
+
+    def test_non_setup_pattern_cannot_be_published_or_enter_catalog(self):
+        repository = InMemoryCaseStudyRepository([{
+            "id": "00000000-0000-0000-0000-000000000002", "isin": "INE002A01018",
+            "pattern_type": "REV-DBOT", "timeframe": "1D", "direction": "BULLISH",
+            "detection_date": date(2025, 1, 2), "review_status": "PENDING",
+            "lineage": {}, "measurements": {}, "supporting_evidence": {}, "context": {},
+        }])
+        service = CaseStudyService(repository)
+        identifier = "00000000-0000-0000-0000-000000000002"
+        with self.assertRaisesRegex(ValueError, "Setups page"):
+            service.review(identifier, {"status": "REVIEWED"})
+        repository.set_review_status(identifier, "REVIEWED")
+        self.assertEqual([], service.catalog({})["items"])

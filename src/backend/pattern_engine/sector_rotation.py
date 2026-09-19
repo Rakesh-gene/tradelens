@@ -12,7 +12,16 @@ def zone(strength, momentum):
     return "IMPROVING" if momentum >= 0 else "LAGGING"
 
 
-def rotation_payload(rows):
+def rotation_payload(rows, history_rows=()):
+    trails = {}
+    for row in history_rows:
+        strength = row.get("rs_3m")
+        baseline, short = row.get("baseline_rs"), row.get("short_rs")
+        momentum = float(short) - float(baseline) if short is not None and baseline is not None else None
+        if strength is not None and momentum is not None:
+            trails.setdefault(row["sector_code"], []).append({
+                "date": row.get("data_as_of"), "strength": strength, "momentum": momentum,
+            })
     items = []
     for row in rows:
         strength = row.get("rs_3m")
@@ -25,6 +34,7 @@ def rotation_payload(rows):
             "rs1m": row.get("rs_1m"), "rs3m": strength,
             "rs6m": row.get("rs_6m"), "rs12m": row.get("rs_12m"),
             "momentum": momentum, "zone": zone(strength, momentum),
+            "trail": sorted(trails.get(row["sector_code"], []), key=lambda point: point["date"] or date.min)[-5:],
             "memberCount": count, "coveredCount": covered, "pairedCount": pairs,
             "coveragePct": covered / count * 100 if count else None,
             "isPartial": covered < count or pairs < count,

@@ -16,7 +16,7 @@ export default function SecuritySearch({ onNavigate, onUnauthorized, onWatchlist
   const [watchlistMessage, setWatchlistMessage] = useState('')
   const choose = (security) => {
     setQuery(''); setResults([]); setActiveIndex(-1); setMessage('')
-    onNavigate(buildSecurityPath(security.isin))
+    onNavigate(buildSecurityPath(security.symbol))
   }
   useEffect(() => {
     const controller = new AbortController()

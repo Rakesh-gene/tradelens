@@ -5,6 +5,7 @@ import base64
 import json
 from uuid import UUID
 from pattern_engine.positional_performance import calculate_positional_performance
+from pattern_engine.enums import SETUP_PATTERN_TYPES
 
 ALLOWED_FILTERS = {"q", "isin", "sector", "patternClass", "patternType", "variant", "timeframe", "direction", "fromDate", "toDate", "exitReason", "outcome", "marketRegime", "minSetupScore", "sort", "directionOrder", "cursor", "pageSize"}
 SORTS = {"detectionDate", "entryDate", "netPnl", "netReturnPct", "netRMultiple", "setupScore"}
@@ -76,9 +77,19 @@ class CaseStudyService:
         if not isinstance(payload, dict): raise ValueError("request body must be an object")
         status = str(payload.get("status") or "").upper()
         if status not in {"REVIEWED", "REJECTED"}: raise ValueError("status must be REVIEWED or REJECTED")
+        existing = self._repository.get_case(case_id)
+        if existing is None: raise LookupError("Case study not found")
+        if status == "REVIEWED" and existing.get("pattern_type") not in SETUP_PATTERN_TYPES:
+            raise ValueError("Only pattern types available on the Setups page can be published as case studies")
         row = self._repository.set_review_status(case_id, status)
         if row is None: raise LookupError("Case study not found")
         return {"caseStudy": _summary(row)}
+
+    def delete(self, case_id):
+        _uuid(case_id)
+        row = self._repository.delete_case(case_id)
+        if row is None: raise LookupError("Case study not found")
+        return {"deletedCaseStudyId": str(row["id"])}
 
     def _with_positional_performance(self, row):
         enriched = dict(row)

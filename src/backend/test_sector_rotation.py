@@ -30,6 +30,9 @@ class SectorRotationTests(unittest.TestCase):
         self.assertEqual(2, sector["coveredCount"])
         self.assertEqual(1, sector["pairedCount"])
         self.assertTrue(sector["isPartial"])
+        self.assertEqual(5, len(sector["trail"]))
+        self.assertEqual((self.as_of - timedelta(days=4)).isoformat(), sector["trail"][0]["date"])
+        self.assertEqual(self.as_of.isoformat(), sector["trail"][-1]["date"])
 
     def test_missing_short_horizon_does_not_fabricate_rotation(self):
         self.repository.features[0]["relative_strength_1m"] = None

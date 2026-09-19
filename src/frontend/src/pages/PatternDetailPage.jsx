@@ -11,6 +11,7 @@ import useDocumentTitle from '../hooks/useDocumentTitle.js'
 import PatternMeasurements from '../components/PatternMeasurements.jsx'
 import SupportingPatternList from '../components/SupportingPatternList.jsx'
 import DecisionSummary from '../components/DecisionSummary.jsx'
+import { buildSecurityPath } from '../routing/routes.js'
 
 export default function PatternDetailPage({ patternId, onNavigate, onUnauthorized }) {
   useDocumentTitle('Pattern evidence')
@@ -28,7 +29,7 @@ export default function PatternDetailPage({ patternId, onNavigate, onUnauthorize
     const meaning = pattern.state === 'TRIGGERED' ? 'Price crossed the trigger level. Review the close against support before acting.' : pattern.state === 'CONFIRMED' ? 'The trigger has follow-through. Keep the invalidation level visible while managing risk.' : 'The setup is still forming. The trigger level is the price to watch.'
     const riskPct = pattern.pivotPrice && pattern.invalidationPrice ? (Number(pattern.pivotPrice) - Number(pattern.invalidationPrice)) / Number(pattern.pivotPrice) * 100 : null
     return <>
-      <Breadcrumbs onNavigate={onNavigate} items={[{ label: 'Setups', to: '/setups' }, { label: pattern.security.symbol || pattern.security.isin, to: `/securities/${pattern.security.isin}` }, { label: pattern.variant || pattern.patternType }]} />
+      <Breadcrumbs onNavigate={onNavigate} items={[{ label: 'Setups', to: '/setups' }, { label: pattern.security.symbol, to: buildSecurityPath(pattern.security.symbol) }, { label: pattern.variant || pattern.patternType }]} />
       <PageIntro eyebrow="Pattern details" title={`${pattern.security.symbol || pattern.security.isin} · ${pattern.variant || pattern.patternType}`} description={`${pattern.security.name || pattern.patternType}. See the chart, key price levels, and signals behind this setup.`} date={pattern.lastUpdatedDate} />
       <section className="trade-brief evidence-card"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>What the evidence says</h2></div><StateBadge state={pattern.state} /></div>{pattern.decision ? <DecisionSummary decision={pattern.decision} /> : <p className="trade-brief__meaning">{meaning}</p>}<div className="level-grid"><div><span>Last close</span><strong>{formatPrice(pattern.lastClose)}</strong></div><div><span>Trigger level</span><strong>{formatPrice(pattern.pivotPrice)}</strong><small>{pattern.triggerDate ? `Triggered ${formatMarketDate(pattern.triggerDate)}` : 'Watch for a decisive close above'}</small></div><div><span>Support</span><strong>{formatPrice(pattern.supportPrice)}</strong></div><div><span>Exit if invalidated</span><strong>{formatPrice(pattern.invalidationPrice)}</strong><small>{riskPct == null ? 'Risk not available' : `${formatPercent(riskPct)} below trigger`}</small></div></div></section>
       <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} markerDate={chart.markerDate} selectedPatternId={pattern.patternInstanceId} evidence={chart.evidence} corporateActions={chart.corporateActions} patternWindow={chart.patternWindow} range={chartRange} onRangeChange={setChartRange} /></section>

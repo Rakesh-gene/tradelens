@@ -73,6 +73,8 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
 
     def list_setups(self, filters, limit, offset):
         clauses = ["p.last_updated_date <= %(as_of)s"]
+        if filters.get("equities_only"):
+            clauses.append("EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ')")
         parameters = {"as_of": filters["as_of"], "limit": limit + 1, "offset": offset}
         if filters.get("pattern_class"):
             clauses.append("p.pattern_class = %(pattern_class)s")
@@ -254,13 +256,13 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
         """
         return self._fetch_all(statement, parameters)
 
-    def setup_facets(self, as_of):
+    def setup_facets(self, as_of, equities_only=False):
         return {
-            "states": self._facet("p.state", as_of),
-            "patternTypes": self._facet("p.pattern_type", as_of),
-            "patternGroups": self._facet("p.pattern_group", as_of),
-            "directions": self._facet("p.direction", as_of),
-            "timeframes": self._facet("p.timeframe", as_of),
+            "states": self._facet("p.state", as_of, equities_only),
+            "patternTypes": self._facet("p.pattern_type", as_of, equities_only),
+            "patternGroups": self._facet("p.pattern_group", as_of, equities_only),
+            "directions": self._facet("p.direction", as_of, equities_only),
+            "timeframes": self._facet("p.timeframe", as_of, equities_only),
             "sectors": self._fetch_all(
                 """
                 SELECT membership.sector_code AS value, sectors.name AS label, COUNT(*) AS count
@@ -270,8 +272,9 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                   AND (membership.effective_to IS NULL OR membership.effective_to >= %s)
                 JOIN market_sectors AS sectors ON sectors.code = membership.sector_code
                 WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL
+                  AND (%s = FALSE OR EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ'))
                 GROUP BY membership.sector_code, sectors.name ORDER BY count DESC, value
-                """, (as_of, as_of, as_of),
+                """, (as_of, as_of, as_of, equities_only),
             ),
         }
 
@@ -310,17 +313,42 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                        AVG(close_price) FILTER (WHERE recency BETWEEN 1 AND 200) AS sma200
                 FROM benchmark_history
                 WHERE recency <= 200
+            ), feature_breadth AS (
+                SELECT AVG(CASE WHEN distance_to_ema_20_pct > 0 THEN 100.0 ELSE 0 END) AS above_ema20_pct,
+                       AVG(CASE WHEN distance_to_sma_50_pct > 0 THEN 100.0 ELSE 0 END) AS above_sma50_pct,
+                       AVG(CASE WHEN distance_to_sma_200_pct > 0 THEN 100.0 ELSE 0 END) AS above_sma200_pct,
+                       COUNT(*) FILTER (WHERE distance_to_52_week_high_pct >= 0) AS new_52_week_highs
+                FROM latest_features
+            ), active_counts AS (
+                SELECT COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'READY') AS ready_count,
+                       COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'TRIGGERED') AS triggered_count,
+                       COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'CONFIRMED') AS confirmed_count,
+                       COUNT(DISTINCT p.isin) FILTER (
+                           WHERE p.pattern_class = 'BREAKOUT'
+                             AND p.state IN ('TRIGGERED','CONFIRMED')
+                       ) AS breakouts,
+                       COUNT(DISTINCT p.isin) FILTER (WHERE p.pattern_type = 'FAIL-BRK') AS failed_breakouts
+                FROM pattern_instances p
+                JOIN nse_equities equity ON equity.isin = p.isin AND equity.series = 'EQ'
+                CROSS JOIN selected_date
+                WHERE p.last_updated_date <= selected_date.value
+                  AND p.terminal_date IS NULL
+                  AND p.pattern_group = 'SETUP'
+                  AND p.timeframe = '1D'
+            ), failed_counts AS (
+                SELECT COUNT(DISTINCT failed.isin) AS failed_count
+                FROM pattern_instances failed
+                JOIN nse_equities equity ON equity.isin = failed.isin AND equity.series = 'EQ'
+                CROSS JOIN selected_date
+                WHERE failed.last_updated_date = selected_date.value
+                  AND failed.state = 'FAILED'
+                  AND failed.pattern_group = 'SETUP'
+                  AND failed.timeframe = '1D'
             )
             SELECT selected_date.value AS data_as_of,
-                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'READY') AS ready_count,
-                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'TRIGGERED') AS triggered_count,
-                   COUNT(DISTINCT p.isin) FILTER (WHERE p.state = 'CONFIRMED') AS confirmed_count,
-                   COUNT(DISTINCT failed.isin) AS failed_count,
-                   COUNT(DISTINCT p.isin) FILTER (
-                       WHERE p.pattern_class = 'BREAKOUT'
-                         AND p.state IN ('TRIGGERED','CONFIRMED')
-                   ) AS breakouts,
-                   COUNT(DISTINCT p.isin) FILTER (WHERE p.pattern_type = 'FAIL-BRK') AS failed_breakouts,
+                   active_counts.ready_count, active_counts.triggered_count,
+                   active_counts.confirmed_count, failed_counts.failed_count,
+                   active_counts.breakouts, active_counts.failed_breakouts,
                    CASE WHEN benchmark_stats.history_sessions < 200 THEN 0
                         ELSE (CASE WHEN benchmark_stats.latest_close > benchmark_stats.sma20 THEN 20 ELSE 0 END
                             + CASE WHEN benchmark_stats.latest_close > benchmark_stats.sma50 THEN 20 ELSE 0 END
@@ -328,26 +356,13 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                             + CASE WHEN benchmark_stats.sma20 > benchmark_stats.prior_sma20 THEN 20 ELSE 0 END
                             + CASE WHEN benchmark_stats.sma50 > benchmark_stats.prior_sma50 THEN 20 ELSE 0 END)
                    END AS regime_score,
-                   (SELECT AVG(CASE WHEN f.distance_to_ema_20_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_ema20_pct,
-                   (SELECT AVG(CASE WHEN f.distance_to_sma_50_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_sma50_pct,
-                   (SELECT AVG(CASE WHEN f.distance_to_sma_200_pct > 0 THEN 100.0 ELSE 0 END) FROM latest_features f) AS above_sma200_pct,
-                   (SELECT COUNT(*) FROM latest_features f WHERE f.distance_to_52_week_high_pct >= 0) AS new_52_week_highs
+                   feature_breadth.above_ema20_pct, feature_breadth.above_sma50_pct,
+                   feature_breadth.above_sma200_pct, feature_breadth.new_52_week_highs
             FROM selected_date
             CROSS JOIN benchmark_stats
-            LEFT JOIN pattern_instances p
-              ON p.last_updated_date <= selected_date.value
-             AND p.terminal_date IS NULL
-             AND p.pattern_group = 'SETUP'
-             AND p.timeframe = '1D'
-            LEFT JOIN pattern_instances failed
-              ON failed.last_updated_date = selected_date.value
-             AND failed.state = 'FAILED'
-             AND failed.pattern_group = 'SETUP'
-             AND failed.timeframe = '1D'
-            GROUP BY selected_date.value, benchmark_stats.history_sessions,
-                     benchmark_stats.latest_close, benchmark_stats.sma20,
-                     benchmark_stats.prior_sma20, benchmark_stats.sma50,
-                     benchmark_stats.prior_sma50, benchmark_stats.sma200
+            CROSS JOIN feature_breadth
+            CROSS JOIN active_counts
+            CROSS JOIN failed_counts
             """, (as_of,),
         ) or {}
 
@@ -538,14 +553,14 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             (isin, as_of, limit),
         )
 
-    def _facet(self, column, as_of):
+    def _facet(self, column, as_of, equities_only=False):
         if column not in {
             "p.state", "p.pattern_type", "p.pattern_group", "p.direction", "p.timeframe",
         }:
             raise ValueError("Unsupported facet")
         return self._fetch_all(
-            f"SELECT {column} AS value, COUNT(*) AS count FROM pattern_instances p WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL GROUP BY {column} ORDER BY count DESC, value",
-            (as_of,),
+            f"SELECT {column} AS value, COUNT(*) AS count FROM pattern_instances p WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL AND (%s = FALSE OR EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ')) GROUP BY {column} ORDER BY count DESC, value",
+            (as_of, equities_only),
         )
 
     def _fetch_one(self, statement, parameters):
@@ -590,7 +605,12 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         return rows[:limit]
 
     def list_setups(self, filters, limit, offset):
-        rows = [self._joined(row, filters["as_of"]) for row in self.patterns if row["last_updated_date"] <= filters["as_of"]]
+        rows = [
+            self._joined(row, filters["as_of"])
+            for row in self.patterns
+            if row["last_updated_date"] <= filters["as_of"]
+            and (not filters.get("equities_only") or self.securities.get(str(row["isin"]), {}).get("series", "EQ") == "EQ")
+        ]
         checks = {
             "pattern_class": "pattern_class", "pattern_type": "pattern_type",
             "variant": "variant", "sector": "sector_code",
@@ -640,10 +660,13 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
             row["total_count"] = len(rows)
         return rows[offset:offset + limit + 1]
 
-    def setup_facets(self, as_of):
+    def setup_facets(self, as_of, equities_only=False):
         def counts(field):
             values = {}
-            for row in self.patterns: values[row.get(field)] = values.get(row.get(field), 0) + 1
+            for row in self.patterns:
+                if equities_only and self.securities.get(str(row["isin"]), {}).get("series", "EQ") != "EQ":
+                    continue
+                values[row.get(field)] = values.get(row.get(field), 0) + 1
             return [{"value": key, "count": value} for key, value in values.items() if key]
         return {
             "states": counts("state"),

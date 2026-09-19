@@ -45,6 +45,13 @@ class WatchlistServiceTestCase(unittest.TestCase):
                 "relative_strength_1m": Decimal("3"), "relative_strength_3m": Decimal("8"),
                 "relative_strength_6m": Decimal("12"), "relative_strength_12m": Decimal("18"),
                 "relative_strength_percentile": Decimal("92"),
+                "rotation_history": [
+                    {"date": date(2026, 9, 5), "strength": Decimal("6"), "momentum": Decimal("0.5")},
+                    {"date": date(2026, 9, 8), "strength": Decimal("7"), "momentum": Decimal("1")},
+                    {"date": date(2026, 9, 9), "strength": Decimal("8"), "momentum": Decimal("1.5")},
+                    {"date": date(2026, 9, 10), "strength": None, "momentum": Decimal("2")},
+                    {"date": date(2026, 9, 11), "strength": Decimal("8"), "momentum": Decimal("2")},
+                ],
                 "sector_relative_strength": Decimal("5.5"), "sector_strength_score": Decimal("74"),
                 "pattern_id": "pattern-1", "pattern_type": "BASE-VCP", "variant": "VCP-3C",
                 "state": "READY", "setup_score": Decimal("84"), "pivot_price": Decimal("100"),
@@ -68,6 +75,9 @@ class WatchlistServiceTestCase(unittest.TestCase):
         self.assertEqual(Decimal("5.5"), payload["items"][0]["sectorContext"]["relativeStrength"])
         self.assertAlmostEqual(3 - 8 / 3, payload["items"][0]["rotation"]["momentum"])
         self.assertEqual("LEADING", payload["items"][0]["rotation"]["zone"])
+        self.assertEqual(4, len(payload["items"][0]["rotation"]["trail"]))
+        self.assertEqual(date(2026, 9, 5), payload["items"][0]["rotation"]["trail"][0]["date"])
+        self.assertEqual(date(2026, 9, 11), payload["items"][0]["rotation"]["trail"][-1]["date"])
         self.assertEqual(1, next(group for group in payload["groups"] if group["id"] == "NEAR_BREAKOUT")["count"])
         self.assertEqual("RELIANCE", payload["activity"][0]["security"]["symbol"])
 

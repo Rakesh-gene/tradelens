@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pattern_engine.models import serialize_value
+from pattern_engine.enums import SETUP_PATTERN_TYPES
 
 
 class InMemoryCaseStudyRepository:
@@ -18,7 +19,7 @@ class InMemoryCaseStudyRepository:
         self.securities = dict(securities or {})
         self.items = {}
     def list_cases(self, filters, limit, offset):
-        rows = [row for row in self.cases if _matches(row, filters)]
+        rows = [row for row in self.cases if row.get("pattern_type") in SETUP_PATTERN_TYPES and _matches(row, filters)]
         sort_fields = {"detectionDate": "detection_date", "entryDate": "entry_date", "netPnl": "net_pnl", "netReturnPct": "net_return_pct", "netRMultiple": "net_r_multiple", "setupScore": "setup_score"}
         field = sort_fields.get(filters.get("sort"), "detection_date")
         rows.sort(key=lambda row: (row.get(field) is not None, row.get(field), str(row.get("id"))), reverse=filters.get("directionOrder", "desc") == "desc")
@@ -33,12 +34,21 @@ class InMemoryCaseStudyRepository:
         if row is None: return None
         row["review_status"] = status
         return dict(row)
+    def delete_case(self, case_id):
+        for index, row in enumerate(self.cases):
+            if str(row["id"]) == str(case_id):
+                self.cases.pop(index)
+                return {"id": str(case_id)}
+        return None
     def facets(self):
         return {key: sorted({str(row[key]) for row in self.cases if row.get(key) is not None}) for key in ("isin", "sector_code", "pattern_class", "pattern_type", "variant", "timeframe", "direction", "exit_reason", "market_regime")}
     def create_run(self, values):
         run_id = str(uuid4()); self.runs[run_id] = {"id": run_id, "status": "PENDING", "created_at": datetime.now(timezone.utc), **dict(values)}; return run_id
     def update_run(self, run_id, **values): self.runs[run_id].update(values)
     def get_run(self, run_id): return dict(self.runs[run_id]) if run_id in self.runs else None
+    def latest_run_id(self, requested_by):
+        rows = [row for row in self.runs.values() if str(row.get("requested_by")) == str(requested_by)]
+        return str(max(rows, key=lambda row: row["created_at"])["id"]) if rows else None
     def get_source_run(self, run_id):
         if run_id in self.source_runs: return dict(self.source_runs[run_id])
         return {"id": run_id, "status": "COMPLETED"} if self.list_source_entries(run_id) else None
@@ -55,6 +65,7 @@ class InMemoryCaseStudyRepository:
         duplicate = next((row for row in self.cases if row.get("case_study_run_id") == item.get("case_study_run_id") and row.get("replay_fingerprint") == item.get("replay_fingerprint") and row.get("selection_reason") == item.get("selection_reason")), None)
         if duplicate: return duplicate["id"]
         item.update(item.get("trade") or {})
+        item["direction"] = case["direction"]
         item["fixed_horizon_outcomes"] = item.get("fixed_horizon_outcomes", {})
         item["policy_inputs"] = (item.get("trade") or {}).get("policy_inputs", {})
         item.setdefault("id", str(uuid5(NAMESPACE_URL, f"tradelens:{item.get('case_study_run_id')}:{item.get('replay_fingerprint')}:{item.get('selection_reason')}"))); self.cases.append(item); return item["id"]
@@ -99,6 +110,9 @@ class PostgresCaseStudyRepository:
             connection.commit()
     def get_run(self, run_id):
         rows = self._fetch("SELECT * FROM case_study_runs WHERE id = %s", (run_id,)); return rows[0] if rows else None
+    def latest_run_id(self, requested_by):
+        rows = self._fetch("SELECT id FROM case_study_runs WHERE requested_by = %s ORDER BY created_at DESC, id DESC LIMIT 1", (requested_by,))
+        return str(rows[0]["id"]) if rows else None
     def get_source_run(self, run_id):
         rows = self._fetch("SELECT id, status, engine_version, configuration_version, feature_version, adjustment_version FROM backtest_runs WHERE id = %s", (run_id,)); return rows[0] if rows else None
     def resolve_stock_build_context(self, isin, adjustment_version):
@@ -124,7 +138,7 @@ class PostgresCaseStudyRepository:
                 cursor.execute("UPDATE case_study_runs SET status = 'FAILED', failure_summary = '{\"pipeline\": \"Build interrupted before completion\"}'::jsonb, completed_at = NOW(), updated_at = NOW() WHERE status IN ('PENDING', 'RUNNING')")
             connection.commit()
     def list_cases(self, filters, limit, offset):
-        clauses, values = ["case_study.review_status = 'REVIEWED'"], []
+        clauses, values = ["case_study.review_status = 'REVIEWED'", "case_study.pattern_type = ANY(%s)"], [list(SETUP_PATTERN_TYPES)]
         columns = {"isin": "case_study.isin", "sector": "case_study.sector_code", "patternClass": "case_study.pattern_class", "patternType": "case_study.pattern_type", "variant": "case_study.variant", "timeframe": "case_study.timeframe", "direction": "case_study.direction", "exitReason": "case_study.exit_reason", "marketRegime": "case_study.market_regime"}
         for name, column in columns.items():
             if filters.get(name): clauses.append(f"{column} = %s"); values.append(filters[name])
@@ -175,6 +189,16 @@ class PostgresCaseStudyRepository:
                 row = cursor.fetchone()
             connection.commit()
         return self.get_case(str(row[0])) if row else None
+    def delete_case(self, case_id):
+        with self._psycopg.connect(self._dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM case_study_trade_results WHERE case_study_id = %s", (case_id,))
+                cursor.execute("DELETE FROM case_studies WHERE id = %s RETURNING id, case_study_run_id", (case_id,))
+                row = cursor.fetchone()
+                if row is not None:
+                    cursor.execute("UPDATE case_study_runs SET cases_recorded = GREATEST(cases_recorded - 1, 0), updated_at = NOW() WHERE id = %s", (row[1],))
+            connection.commit()
+        return {"id": str(row[0])} if row else None
     def facets(self):
         rows = self._fetch("SELECT array_remove(array_agg(DISTINCT isin), NULL) AS stocks, array_remove(array_agg(DISTINCT pattern_class), NULL) AS pattern_classes, array_remove(array_agg(DISTINCT pattern_type), NULL) AS pattern_types, array_remove(array_agg(DISTINCT variant), NULL) AS variants, array_remove(array_agg(DISTINCT timeframe), NULL) AS timeframes, array_remove(array_agg(DISTINCT direction), NULL) AS directions, array_remove(array_agg(DISTINCT exit_reason), NULL) AS exit_reasons, array_remove(array_agg(DISTINCT sector_code), NULL) AS sectors, array_remove(array_agg(DISTINCT market_regime), NULL) AS market_regimes FROM case_studies")
         return rows[0] if rows else {}

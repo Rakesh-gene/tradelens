@@ -98,7 +98,7 @@ dynamic routes are added.
 | `/sector-rotation` | Protected | `SectorRotationPage` | Sector RS and rotation drill-down |
 | `/setups` | Protected | `SetupsPage` | Filtered, paginated opportunity list |
 | `/patterns/:patternId` | Protected | `PatternDetailPage` | Pattern evidence and timeline |
-| `/securities/:isin` | Protected | `SecurityPage` | Complete technical fingerprint |
+| `/securities/:symbol` | Protected | `SecurityPage` | Complete technical fingerprint; resolve the public symbol to an ISIN before data requests |
 | `/research` | Protected, later | `ResearchPage` | Historical pattern outcome analysis |
 
 Unknown public or protected paths render `NotFoundPage`. When the path is
@@ -111,7 +111,7 @@ Create `src/frontend/src/routing/routes.js` with:
 ```js
 export function matchRoute(pathname) {}
 export function buildPatternPath(patternId) {}
-export function buildSecurityPath(isin) {}
+export function buildSecurityPath(symbol) {}
 export function isProtectedRoute(route) {}
 ```
 

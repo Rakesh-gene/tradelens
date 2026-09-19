@@ -26,6 +26,14 @@ cost, and P/L simulation may remain stored as secondary research lineage, but
 must not define the catalog cards, representative-case ranking, or principal
 case-study narrative.
 
+## Accepted pattern eligibility correction (2026-09-14)
+
+Case-study eligibility uses the exact stable pattern-type inventory exposed by
+the Setups page Pattern Type dropdown. Engine-only reversal, continuation, and
+harmonic types outside that inventory must not be selected or published as
+case studies. Older unsupported drafts remain visible to administrators only
+so they can be deleted; they cannot pass the publication gate.
+
 ## Existing foundation
 
 The repository already provides:

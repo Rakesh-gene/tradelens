@@ -10,13 +10,14 @@ export default function AppShell({ children, user, onNavigate, onSignOut, onWatc
     <a className="skip-link" href="#main-content">Skip to content</a>
     <header className="app-header">
       <NavigationLink className="brand-button" to="/overview" onNavigate={onNavigate} aria-label="TradeLens overview"><span className="brand-mark">TL</span><span><strong>Tradelens</strong><small>Position intelligence</small></span></NavigationLink>
-      <nav className="app-nav" aria-label="Primary navigation">
+      <nav className="app-nav" aria-label="Primary navigation" data-guide="primary-navigation">
         <NavigationLink to="/overview" onNavigate={onNavigate}>Overview</NavigationLink>
         <NavigationLink to="/sector-rotation" onNavigate={onNavigate}>Sector rotation</NavigationLink>
         <NavigationLink to="/setups" onNavigate={onNavigate}>Setups</NavigationLink>
         <NavigationLink to="/case-studies" onNavigate={onNavigate}>Case studies</NavigationLink>
         <NavigationLink to="/watchlist" onNavigate={onNavigate}>Watchlist</NavigationLink>
         <NavigationLink to="/indices" onNavigate={onNavigate}>Indices</NavigationLink>
+        <NavigationLink to="/guide" onNavigate={onNavigate}>Guide</NavigationLink>
         {(user?.isAdmin || user?.is_admin) && <NavigationLink to="/admin/pipeline" onNavigate={onNavigate}>Pipeline</NavigationLink>}
         {(user?.isAdmin || user?.is_admin) && <NavigationLink to="/admin/case-studies" onNavigate={onNavigate}>Case build</NavigationLink>}
       </nav>

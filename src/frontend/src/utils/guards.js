@@ -9,6 +9,18 @@ export function isIsin(value) {
   return typeof value === 'string' && ISIN_PATTERN.test(value.toUpperCase())
 }
 
+export function isSecuritySlug(value) {
+  if (typeof value !== 'string') return false
+  const normalized = value.trim().toUpperCase()
+  return !isIsin(normalized) && /^[A-Z0-9][A-Z0-9._&-]{0,30}$/.test(normalized)
+}
+
+export function isIndexCode(value) {
+  if (typeof value !== 'string') return false
+  const normalized = value.trim().toUpperCase()
+  return !isIsin(normalized) && /^[A-Z0-9][A-Z0-9 .&-]{0,80}$/.test(normalized)
+}
+
 export function safeDecodeSegment(value) {
   try {
     return decodeURIComponent(value)

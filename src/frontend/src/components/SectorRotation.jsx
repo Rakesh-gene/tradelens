@@ -3,11 +3,12 @@ import { getSectorRotation, getSectorStocks } from '../api/marketApi.js'
 import useApiResource from '../useApiResource.js'
 import { EmptyState, ResourceState } from './ResourceStates.jsx'
 import NavigationLink from './NavigationLink.jsx'
+import RotationQuadrant, { ROTATION_ZONE_LABELS } from './RotationQuadrant.jsx'
 import { buildSecurityPath } from '../routing/routes.js'
 import { formatNumber } from '../utils/formatters.js'
 
 const number = (value) => value == null ? 'Unavailable' : `${formatNumber(value)} pp`
-const labels = { LEADING: 'Leading', WEAKENING: 'Weakening', LAGGING: 'Lagging', IMPROVING: 'Improving', UNAVAILABLE: 'Insufficient history' }
+const labels = ROTATION_ZONE_LABELS
 
 function SectorStocks({ sector, asOf, onUnauthorized, onNavigate }) {
   const cursor = new URLSearchParams(window.location.search).get('sectorCursor')
@@ -25,7 +26,7 @@ function SectorStocks({ sector, asOf, onUnauthorized, onNavigate }) {
       {resource.status === 'success' && resource.data && <>
         {resource.data.items.length ? <ol className="sector-stock-rows">{resource.data.items.map((item) => <li key={item.security.isin}>
           <span className="sector-stock-rank">{item.rank ?? '—'}</span>
-          <NavigationLink to={buildSecurityPath(item.security.isin)} onNavigate={onNavigate}>{item.security.symbol}<small>{item.security.name}</small></NavigationLink>
+          <NavigationLink to={buildSecurityPath(item.security.symbol)} onNavigate={onNavigate}>{item.security.symbol}<small>{item.security.name}</small></NavigationLink>
           <strong>{number(item.rs3m)}</strong>
         </li>)}</ol> : <EmptyState title="No stocks available" message="No classified equities are available for this sector and date." />}
         <div className="sector-pagination">{cursor && <button className="secondary-button" onClick={() => setCursor(null)}>First page</button>}{resource.data.nextCursor && <button className="secondary-button" onClick={() => setCursor(resource.data.nextCursor)}>Next 25 stocks</button>}</div>
@@ -49,8 +50,7 @@ export default function SectorRotation({ onUnauthorized, onNavigate }) {
   const data = resource.data
   const items = data?.items || []
   const plotted = items.filter((item) => item.rs3m != null && item.momentum != null)
-  const xMax = Math.max(1, ...plotted.map((item) => Math.abs(item.rs3m))) * 1.15
-  const yMax = Math.max(1, ...plotted.map((item) => Math.abs(item.momentum))) * 1.15
+  const rotationItems = items.map((item) => ({ ...item, rotation: { strength: item.rs3m, momentum: item.momentum, zone: item.zone, trail: item.trail } }))
   const chosen = items.find((item) => item.code === selected)
   return <section className="sector-rotation" aria-labelledby="sector-rotation-title">
     <h2 id="sector-rotation-title">Sector rotation</h2>
@@ -59,25 +59,7 @@ export default function SectorRotation({ onUnauthorized, onNavigate }) {
       {data && <>
         <p>End of day: {data.dataAsOf || 'Unavailable'} · Momentum proxy: 1M RS − 3M RS / 3{data.isStale && ' · Stale data'}</p>
         {!items.length ? <EmptyState title="Sector strength is not available yet" message="Sector classifications and benchmark-aligned technical features are needed." /> : <>
-          <div className="rotation-axis-title">↑ RS momentum proxy (pp): accelerating above zero</div>
-          <div className="rotation-plot" role="group" aria-label="Sector relative strength and momentum quadrants">
-            <div className="rotation-zone rotation-zone--improving">Improving</div><div className="rotation-zone rotation-zone--leading">Leading</div>
-            <div className="rotation-zone rotation-zone--lagging">Lagging</div><div className="rotation-zone rotation-zone--weakening">Weakening</div>
-            <span className="rotation-origin">0</span>
-            {plotted.map((item, index) => <button key={item.code} className={`rotation-point${selected === item.code ? ' is-selected' : ''}`} style={{ left: `${50 + Number(item.rs3m) / xMax * 44}%`, top: `${50 - Number(item.momentum) / yMax * 44}%` }} onClick={() => setSelected(item.code)} aria-pressed={selected === item.code} aria-label={`${item.name}: ${labels[item.zone]}, RS ${number(item.rs3m)}, momentum ${number(item.momentum)}`} title={`${item.name}: ${labels[item.zone]}`}>
-              {index + 1}
-            </button>)}
-          </div>
-          <div className="rotation-mobile" aria-label="Sector zones on mobile">
-            {['IMPROVING', 'LEADING', 'LAGGING', 'WEAKENING'].map((state) => <section className={`rotation-mobile-zone rotation-zone--${state.toLowerCase()}`} key={state} aria-label={`${labels[state]} sectors`}>
-              <h3>{labels[state]}</h3>
-              {plotted.filter((item) => item.zone === state).map((item) => <button className="secondary-button" key={item.code} onClick={() => setSelected(item.code)} aria-pressed={selected === item.code} aria-label={`${item.name} in ${labels[state]}`}>
-                {item.name}<small>{number(item.rs3m)}</small>
-              </button>)}
-            </section>)}
-          </div>
-          <div className="rotation-axis-title">3-month relative strength (pp) →</div>
-          {!plotted.length && <p>No sectors have comparable history yet. Current RS is listed below.</p>}
+          <RotationQuadrant title="Five-session progression" description="Paths show how sector relative strength has progressed against NIFTY 500." items={rotationItems} itemId={(item) => item.code} itemLabel={(item) => item.name} onOpen={(item) => setSelected(item.code)} selectedId={selected} emptyMessage="No sectors have comparable history yet. Current RS is listed below." ariaLabel="Sector relative strength and momentum quadrants" />
           {chosen && <SectorStocks key={`${chosen.code}:${data.dataAsOf}`} sector={chosen} asOf={data.dataAsOf} onUnauthorized={onUnauthorized} onNavigate={onNavigate} />}
           <section className="sector-legend" aria-label="Sector relative strength ranking">
             <div className="sector-legend__head" aria-hidden="true"><span>Rank</span><span>Sector</span><span>Zone</span><span>3M RS</span><span>Momentum</span><span>Coverage</span></div>
