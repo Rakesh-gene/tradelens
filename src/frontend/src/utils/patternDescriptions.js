@@ -66,8 +66,31 @@ const PATTERNS = {
   },
 }
 
+const SUPPORTING_PATTERNS = {
+  'BASE-TIGHT': ['tight base', 'A tight base is a short, narrow consolidation after an advance. Small price swings show that the stock is holding its gains while supply is limited.', 'Look for a decisive move above the top of the tight range while the lower edge remains intact.'],
+  'TREND-HHHL': ['higher highs and higher lows', 'This trend structure shows successive advances reaching higher highs and pullbacks holding at higher lows.', 'The structure weakens if a meaningful prior higher low is lost.'],
+  'TREND-S2': ['trend support', 'Price is repeatedly respecting a rising support area, suggesting buyers are continuing to defend the trend.', 'Review whether the next pullback holds support rather than assuming the trend will continue.'],
+  'TREND-MA': ['moving-average trend', 'Price is holding above or recovering around key moving averages, which provides a simple view of trend alignment.', 'A moving average is context, not a trigger by itself; combine it with price structure and lifecycle evidence.'],
+  'COMP-NR7': ['narrow-range contraction', 'The current session has an unusually narrow range compared with the preceding sessions, showing a temporary reduction in volatility.', 'A later expansion can be worth watching, but direction is not known from compression alone.'],
+  'COMP-IB': ['inside-bar compression', 'An inside bar trades entirely within the prior session range, showing a short pause in price movement.', 'The break from the parent range provides the direction to investigate.'],
+  'COMP-ATR': ['ATR contraction', 'Average true range has contracted, meaning typical daily movement has become smaller.', 'Compression is supporting evidence; wait for price structure and a trigger to establish direction.'],
+  'COMP-RANGE': ['range compression', 'Price has remained in a constrained range, creating a visible boundary for later breakout or breakdown evidence.', 'Use the range edges with volume and lifecycle evidence rather than treating the range alone as a signal.'],
+  'MOM-ACC': ['momentum acceleration', 'Relative-strength or price momentum is improving, indicating that the rate of outperformance is increasing.', 'Acceleration is strongest when it agrees with the price structure and market context.'],
+  'MOM-RSL': ['relative-strength leadership', 'The stock is outperforming its benchmark over the measured horizon.', 'Leadership can change; compare its five-session progression and price structure before relying on it.'],
+  'MOM-RSB': ['relative-strength breakout', 'Relative strength has pushed through a meaningful prior high, signalling renewed outperformance against the benchmark.', 'Confirm that price action and the broader context support the relative-strength move.'],
+  'VOL-DRY': ['volume dry-up', 'Trading participation has contracted during a pause or pullback, which can indicate that selling pressure is becoming less active.', 'A dry-up is supporting evidence, not a standalone entry condition.'],
+  'VOL-EXP': ['volume expansion', 'Trading participation has expanded meaningfully, often around a breakout or decisive price move.', 'Check whether price held the move; high volume alone does not validate direction.'],
+  'FAIL-BRK': ['failed breakout', 'Price moved beyond a breakout level but quickly lost that level and returned to the prior range.', 'It is terminal evidence for that breakout instance and remains visible for research.'],
+  'FAIL-BASE': ['failed base', 'A base structure lost the support or invalidation area that was holding its geometry together.', 'The original setup is no longer ranked as active evidence.'],
+  'FAIL-EMA20': ['failed EMA pullback', 'A pullback around the 20-day EMA did not hold and price lost the expected support area.', 'Use it as evidence that the pullback thesis weakened, not as an automatic trade instruction.'],
+  'FAIL-SMA50': ['failed SMA pullback', 'A pullback around the 50-day SMA lost medium-term support and no longer meets the intended structure.', 'The original setup is retained as terminal evidence for review.'],
+  'FAIL-STRUCT': ['structural failure', 'A key geometric feature of the pattern was broken, so the stored structure can no longer be treated as valid.', 'Inspect the event timeline and invalidation level to understand what changed.'],
+}
+
 export function describePattern(patternType) {
   const key = String(patternType || '').toUpperCase()
+  const supporting = SUPPORTING_PATTERNS[key]
+  if (supporting) return { label: supporting[0], description: supporting[1], confirmation: supporting[2] }
   return PATTERNS[key] || {
     label: key ? key.replaceAll('-', ' ').toLowerCase() : 'chart pattern',
     description: 'This pattern was identified from the shape and behavior of price using information available on the detection date.',

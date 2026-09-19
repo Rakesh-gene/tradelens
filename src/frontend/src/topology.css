@@ -83,6 +83,7 @@
   --color-state-actionable: var(--color-amber-200);
   --color-state-active: var(--color-success-200);
   --color-state-terminal: var(--color-danger-200);
+  --color-scheme: dark;
 
   /* Gradients, glow, opacity, backdrop, and elevation. */
   --gradient-page: radial-gradient(circle at 10% 12%, rgb(255 214 103 / 0.22), transparent 22rem), radial-gradient(circle at 88% 18%, rgb(242 141 63 / 0.14), transparent 18rem), radial-gradient(circle at 52% 108%, rgb(77 105 86 / 0.22), transparent 22rem), linear-gradient(145deg, var(--color-ink-900) 0%, var(--color-ink-750) 44%, var(--color-ink-650) 100%);
@@ -201,7 +202,23 @@
   --font-smoothing-moz: grayscale;
 }
 
-/* User-selectable atmospheres. All five retain low glare and avoid pure black or white. */
+/* User-selectable atmospheres retain low glare and avoid harsh pure-black contrast. */
+:root[data-theme="light"] {
+  --color-cream-100: #18211c; --color-cream-150: #243028; --color-cream-200: #2f3a32;
+  --color-text-primary: #2f3a32; --color-text-strong: #172018; --color-text-on-accent: #24170d;
+  --color-text-muted: rgb(47 58 50 / .76); --color-text-subtle: rgb(47 58 50 / .62); --color-text-disabled: rgb(47 58 50 / .42); --color-text-label: rgb(35 47 39 / .9);
+  --color-accent: #b86e24; --color-accent-soft: rgb(184 110 36 / .12); --color-accent-focus: rgb(184 110 36 / .58);
+  --color-surface-panel: rgb(242 237 226 / .94); --color-surface-card: rgb(250 246 237 / .82); --color-surface-control: rgb(81 67 45 / .09); --color-surface-secondary: rgb(81 67 45 / .13); --color-surface-secondary-quiet: rgb(81 67 45 / .075);
+  --color-border-subtle: rgb(82 65 39 / .18); --color-border-default: rgb(82 65 39 / .28);
+  --color-success-200: #2f7b49; --color-success-500: #3d8b56; --color-danger-200: #b13f46; --color-danger-500: #b13f46;
+  --color-success-bg: rgb(61 139 86 / .12); --color-success-border: rgb(61 139 86 / .3); --color-danger-bg: rgb(177 63 70 / .1); --color-danger-border: rgb(177 63 70 / .28);
+  --color-state-developing: #647066; --color-state-actionable: #a45e1b; --color-state-active: #2f7b49; --color-state-terminal: #b13f46;
+  --color-scheme: light;
+  --gradient-page: radial-gradient(circle at 10% 10%, rgb(230 181 96 / .24), transparent 24rem), radial-gradient(circle at 90% 16%, rgb(190 145 87 / .16), transparent 21rem), radial-gradient(circle at 52% 110%, rgb(137 169 137 / .2), transparent 24rem), linear-gradient(145deg, #eee9dd 0%, #e6dfd1 48%, #dce5d9 100%);
+  --gradient-accent: linear-gradient(155deg, #e9bd67, #bf7229); --gradient-panel: linear-gradient(145deg, rgb(250 246 237 / .9), rgb(229 219 199 / .82));
+  --shadow-panel: 0 1.25rem 3rem rgb(68 50 25 / .16); --shadow-primary-button: 0 1rem 2rem rgb(184 110 36 / .18); --shadow-focus: 0 0 0 4px rgb(184 110 36 / .18);
+}
+
 :root[data-theme="ember"] {
   --color-text-primary: #f6ecd6; --color-text-strong: #fff8ea; --color-text-on-accent: #29180d;
   --color-text-muted: rgb(246 236 214 / .7); --color-text-subtle: rgb(246 236 214 / .58); --color-text-label: rgb(246 236 214 / .84);

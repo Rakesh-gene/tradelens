@@ -55,6 +55,19 @@ export default function SecuritySearch({ onNavigate, onUnauthorized, onWatchlist
     }, 250)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [query, onUnauthorized])
+  useEffect(() => {
+    const closeWhenOutside = (event) => {
+      if (!input.current?.closest('.security-jump')?.contains(event.target)) {
+        setResults([])
+        setActiveIndex(-1)
+        setStatus('idle')
+        setMessage('')
+        setWatchlistMessage('')
+      }
+    }
+    document.addEventListener('pointerdown', closeWhenOutside)
+    return () => document.removeEventListener('pointerdown', closeWhenOutside)
+  }, [])
   const keyDown = (event) => {
     if (event.key === 'ArrowDown' && results.length) { event.preventDefault(); setActiveIndex((value) => (value + 1) % results.length) }
     else if (event.key === 'ArrowUp' && results.length) { event.preventDefault(); setActiveIndex((value) => (value - 1 + results.length) % results.length) }

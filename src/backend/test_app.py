@@ -178,17 +178,17 @@ class ApiTestCase(unittest.TestCase):
             token = json.load(response)["accessToken"]
         update = Request(
             f"{self.base_url}/api/profile", method="PATCH",
-            data=json.dumps({"theme": "ocean"}).encode(),
+            data=json.dumps({"theme": "light"}).encode(),
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
         with urlopen(update) as response:
-            self.assertEqual("ocean", json.load(response)["user"]["theme"])
+            self.assertEqual("light", json.load(response)["user"]["theme"])
         current = Request(
             f"{self.base_url}/api/auth/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         with urlopen(current) as response:
-            self.assertEqual("ocean", json.load(response)["user"]["theme"])
+            self.assertEqual("light", json.load(response)["user"]["theme"])
 
         invalid = Request(
             f"{self.base_url}/api/profile", method="PATCH",

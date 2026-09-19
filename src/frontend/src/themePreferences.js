@@ -2,6 +2,7 @@ export const DEFAULT_THEME = 'ember'
 export const THEME_STORAGE_KEY = 'tradelensTheme'
 
 export const THEMES = [
+  { id: 'light', name: 'White', description: 'Soft paper white with warm amber emphasis.' },
   { id: 'ember', name: 'Ember', description: 'Warm amber with grounded cocoa tones.' },
   { id: 'forest', name: 'Forest', description: 'Moss green with soft sage highlights.' },
   { id: 'ocean', name: 'Ocean', description: 'Deep teal with clear aqua accents.' },

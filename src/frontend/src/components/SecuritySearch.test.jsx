@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SecuritySearch from './SecuritySearch.jsx'
@@ -36,6 +36,17 @@ describe('SecuritySearch', () => {
     await userEvent.type(screen.getByRole('combobox'), 'r')
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(searchSecurities).not.toHaveBeenCalled()
+  })
+
+  it('closes results when a pointer action occurs outside the search', async () => {
+    searchSecurities.mockResolvedValue({ items: [
+      { isin: 'INE002A01018', symbol: 'RELIANCE', name: 'Reliance Industries Limited' },
+    ] })
+    render(<><SecuritySearch onNavigate={() => {}} onUnauthorized={() => {}} /><button type="button">Elsewhere</button></>)
+    await userEvent.type(screen.getByRole('combobox'), 'rel')
+    await screen.findByRole('option', { name: /reliance/i }, { timeout: 1000 })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }))
+    expect(screen.queryByRole('listbox', { name: 'Matching equities' })).toBeNull()
   })
 
   it('aborts a superseded lookup', async () => {

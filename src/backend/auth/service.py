@@ -10,7 +10,7 @@ from auth.models import AuthenticationResult, RegistrationResult
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 DEFAULT_THEME = "ember"
-SUPPORTED_THEMES = ("ember", "forest", "ocean", "plum", "slate")
+SUPPORTED_THEMES = ("light", "ember", "forest", "ocean", "plum", "slate")
 
 
 class UserRepository(Protocol):

@@ -13,8 +13,8 @@ describe('theme preferences', () => {
   })
 
   it('applies and persists a supported theme', () => {
-    expect(applyTheme('plum')).toBe('plum')
-    expect(document.documentElement.dataset.theme).toBe('plum')
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('plum')
+    expect(applyTheme('light')).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
   })
 })
