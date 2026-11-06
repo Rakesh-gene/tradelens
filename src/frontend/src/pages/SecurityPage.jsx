@@ -87,9 +87,9 @@ export default function SecurityPage({ symbol, indexCode, onNavigate, onUnauthor
         />
         {!indexCode && <WatchlistButton isin={fingerprint.security.isin} onUnauthorized={onUnauthorized} />}
 
-        {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><div><p className="eyebrow">Decision intelligence</p><h2>Current operating view</h2></div><StateBadge state={primary.state} /></div><DecisionSummary decision={primary.decision} /></section>}
+        {primary?.decision && <section className="evidence-card security-decision"><div className="card-title"><h2>Decision intelligence</h2></div><DecisionSummary decision={primary.decision} /></section>}
 
-        <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} evidence={chart.evidence} corporateActions={chart.corporateActions} range={chartRange} onRangeChange={setChartRange} /></section>
+        <section className="evidence-card"><PatternCandlestickChart candles={chart.candles} levels={chart.levels} selectedPatternId={chart.focusedPatternId || primary?.patternInstanceId} patternAnnotations={chart.patternAnnotations} evidence={chart.evidence} corporateActions={chart.corporateActions} range={chartRange} onRangeChange={setChartRange} /></section>
 
         <section className="detail-grid">
           <article className="evidence-card"><h2>Company classification</h2><MeasurementGrid values={classificationValues} /></article>
@@ -149,12 +149,6 @@ export default function SecurityPage({ symbol, indexCode, onNavigate, onUnauthor
           <PatternTimeline events={fingerprint.recentEvents} />
         </section>
 
-        <section className="lineage" aria-label="Data lineage">
-          <span>Engine {fingerprint.lineage.engineVersion || '-'}</span>
-          <span>Configuration {fingerprint.lineage.configurationVersion || '-'}</span>
-          <span>Features {fingerprint.lineage.featureVersion || '-'}</span>
-          <span>Adjustments {fingerprint.lineage.adjustmentVersion || '-'}</span>
-        </section>
       </>
     })()}
   </ResourceState>

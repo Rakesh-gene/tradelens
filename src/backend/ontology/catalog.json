@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "namespace": "urn:tradelens:ontology:",
+  "intents": {
+    "equity_setup_today": {
+      "question": "What is the setup this equity has today?",
+      "query": "equity_setup_today.rq",
+      "competencyQuestion": "CQ01",
+      "scope": "Current daily primary BASE/BREAKOUT/PULLBACK setups; actual evidence date required",
+      "terms": ["Security", "PrimarySetupSnapshot", "PatternInstance", "LifecycleState", "QualityScore", "MaturityScore", "ContextScore", "SetupScore"],
+      "definitions": {
+        "Security": "An instrument identified internally by stable ISIN.",
+        "PrimarySetupSnapshot": "Dated retained evidence for a primary base, breakout or pullback; not a historical reconstruction.",
+        "PatternInstance": "A deduplicated detected structure with a stable pattern UUID.",
+        "LifecycleState": "The engine-persisted lifecycle state at the snapshot evidence date.",
+        "QualityScore": "The persisted quality of pattern geometry on a 0-100 scale.",
+        "MaturityScore": "The persisted degree of structural development on a 0-100 scale.",
+        "ContextScore": "The persisted market and sector context evidence on a 0-100 scale.",
+        "SetupScore": "Ranks evidence; never a win probability or expected return."
+      },
+      "inference": "BaseSnapshot, BreakoutSnapshot and PullbackSnapshot entail PrimarySetupSnapshot; scores do not entail lifecycle or probability"
+    }
+  }
+}

@@ -12,6 +12,8 @@ from typing import Protocol
 from pattern_engine.enums import PatternClass, PatternState, SUPPORTED_PATTERN_TYPES
 from pattern_engine.decision_intelligence import METHODOLOGY_VERSION as DECISION_VERSION, build_decision
 from pattern_engine.models import serialize_value
+from pattern_engine.overview_qualification import load_overview_qualification
+from pattern_engine.chart_annotations import pattern_annotations
 
 
 class PatternQueryRepository(Protocol):
@@ -22,6 +24,7 @@ class PatternQueryRepository(Protocol):
     def list_setups(self, filters, limit, offset): ...
     def setup_facets(self, as_of, equities_only=False): ...
     def overview_summary(self, as_of): ...
+    def overview_setups(self, as_of, policy, limit, offset): ...
     def index_overview_rows(self, as_of, sessions): ...
     def latest_scan_run(self): ...
     def get_pattern(self, pattern_id): ...
@@ -37,8 +40,9 @@ class PatternQueryRepository(Protocol):
 
 
 class PatternQueryService:
-    def __init__(self, repository: PatternQueryRepository) -> None:
+    def __init__(self, repository: PatternQueryRepository, overview_policy=None) -> None:
         self._repository = repository
+        self._overview_policy = overview_policy or load_overview_qualification()
 
     def sector_rotation(self, query):
         from pattern_engine.sector_rotation import rotation_payload
@@ -69,12 +73,12 @@ class PatternQueryService:
     def overview(self, query):
         as_of = _optional_date(_one(query, "asOf"))
         top = _integer(_one(query, "top"), 10, 1, 25, "top")
+        offset = _decode_cursor(_one(query, "cursor"))
         summary = self._repository.overview_summary(as_of)
         data_as_of = summary.get("data_as_of") or as_of
-        setup_filters = _default_filters(data_as_of or date.today())
-        setup_filters["states"] = ("READY", "TRIGGERED", "CONFIRMED")
-        setup_filters["equities_only"] = True
-        rows = self._repository.list_setups(setup_filters, top, 0)[:top]
+        selection = self._repository.overview_setups(data_as_of or date.today(), self._overview_policy, top, offset)
+        page = selection["items"]
+        rows = page[:top]
         run = self._repository.latest_scan_run()
         regime = _number(summary.get("regime_score"))
         indices = _index_overview(self._repository.index_overview_rows(data_as_of, 63))
@@ -104,7 +108,9 @@ class PatternQueryService:
                 state: int(summary.get(f"{state.lower()}_count") or 0)
                 for state in ("READY", "TRIGGERED", "CONFIRMED", "FAILED")
             },
-            "topSetups": [_setup(row) for row in rows],
+            "topSetups": [{**_setup(row), "overviewQualification": self._overview_policy.evidence(row)} for row in rows],
+            "nextCursor": _encode_cursor(offset + top) if len(page) > top else None,
+            "qualification": self._overview_policy.metadata(selection["candidateCount"], selection["qualifiedCount"], _iso(data_as_of)),
         }
 
     def search_securities(self, query):
@@ -122,6 +128,7 @@ class PatternQueryService:
     def setups(self, query):
         filters = self._setup_filters(query)
         filters["equities_only"] = True
+        filters["latest_only"] = True
         page_size = _integer(_one(query, "pageSize"), 25, 10, 100, "pageSize")
         offset = _decode_cursor(_one(query, "cursor"))
         rows = self._repository.list_setups(filters, page_size, offset)
@@ -169,7 +176,20 @@ class PatternQueryService:
         if row is None:
             raise LookupError("Pattern not found")
         evidence = self._repository.list_security_patterns(row["isin"], row["last_updated_date"])
-        return {"pattern": _pattern(row, evidence)}
+        latest_feature = self._repository.get_latest_feature(row["isin"], date.today()) or {}
+        data_as_of = row["last_updated_date"]
+        latest_data_as_of = latest_feature.get("trading_date")
+        has_newer_data = bool(latest_data_as_of and latest_data_as_of > data_as_of)
+        return {
+            "pattern": _pattern(row, evidence),
+            "dataAsOf": data_as_of,
+            "latestDataAsOf": latest_data_as_of,
+            "hasNewerData": has_newer_data,
+            "generatedAt": datetime.now(timezone.utc),
+            "engineVersion": row.get("engine_version"),
+            "configurationVersion": row.get("configuration_version"),
+            "isStale": has_newer_data or (date.today() - data_as_of).days > 3,
+        }
 
     def events(self, pattern_id, query):
         if self._repository.get_pattern(pattern_id) is None:
@@ -213,6 +233,7 @@ class PatternQueryService:
             },
             "markerDate": row.get("trigger_date") or row.get("detected_date"),
             "patternWindow": {"startDate": row.get("start_date"), "endDate": row.get("last_updated_date")},
+            "patternAnnotations": pattern_annotations(evidence, bars, as_of, adjustment_version, pattern_id),
             "evidence": [_evidence(item) for item in evidence],
             "corporateActions": [_chart_action(item) for item in actions],
         }
@@ -231,9 +252,23 @@ class PatternQueryService:
         bars = [] if not adjustment_version else self._repository.list_chart_bars(
             isin, adjustment_version, as_of, start_date,
         )
-        primary = next((row for row in evidence if row.get("terminal_date") is None and row.get("pattern_class") in {"BASE", "BREAKOUT", "PULLBACK"}), None)
+        # Match the fingerprint's primary setup, including a READY/forming base.
+        # Confirmation controls entry markers, not whether its structure exists.
+        current_patterns = self._repository.list_security_patterns(isin, as_of)
+        primary = next((row for row in current_patterns if row.get("terminal_date") is None
+                        and row.get("pattern_class") in {"BASE", "BREAKOUT", "PULLBACK"}
+                        and row.get("last_updated_date") <= as_of), None)
+        focused_id = str(primary["id"]) if primary else None
+        if primary and not any(str(row.get("id")) == focused_id for row in evidence):
+            evidence = [primary, *evidence]
+        annotations = pattern_annotations(evidence, bars, as_of, adjustment_version, focused_id)
+        if focused_id is None and annotations:
+            focused_id = annotations[-1]["patternInstanceId"]
+            primary = next((row for row in evidence if str(row.get("id")) == focused_id), None)
         return {
             "security": _security(security), "dataAsOf": bars[-1].get("trading_date") if bars else as_of,
+            "patternAnnotations": annotations,
+            "focusedPatternId": focused_id,
             "range": window, "adjusted": True, "adjustmentVersion": adjustment_version,
             "candles": [{
                 "date": bar.get("trading_date"), "open": bar.get("open_price"),
@@ -483,6 +518,9 @@ def _pattern(row, evidence=()):
 def _evidence(row):
     return {
         **_setup(row),
+        "startDate": row.get("start_date"),
+        "confirmationDate": row.get("confirmation_date"),
+        "terminalDate": row.get("terminal_date"),
         "triggerDate": row.get("trigger_date"),
         "supportPrice": row.get("support_price"),
         "invalidationPrice": row.get("invalidation_price"),

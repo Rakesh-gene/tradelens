@@ -1,0 +1,13 @@
+@prefix tl: <urn:tradelens:ontology:> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+tl:SnapshotShape a sh:NodeShape ; sh:targetClass tl:PatternSnapshot ;
+    sh:property [ sh:path tl:aboutSecurity ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path tl:snapshotOf ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path tl:asOfDate ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:date ] ;
+    sh:property [ sh:path tl:lifecycleState ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:in (tl:DETECTED tl:FORMING tl:MATURE tl:READY tl:TRIGGERED tl:CONFIRMED tl:FAILED tl:INVALIDATED tl:EXPIRED) ] .
+tl:ScoreShape a sh:NodeShape ; sh:targetClass tl:ScoreObservation ;
+    sh:property [ sh:path tl:numericValue ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:decimal ; sh:minInclusive 0 ; sh:maxInclusive 100 ] ;
+    sh:property [ sh:path tl:unitCode ; sh:minCount 1 ; sh:maxCount 1 ; sh:hasValue "scorePoints" ] .

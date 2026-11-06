@@ -35,6 +35,9 @@ from pattern_engine.runner import PatternEngineRunner, PatternEngineVersions
 from watchlist.service import WatchlistService
 from indices.service import IndexPipelineService, IndexQueryService
 from server_http.api import ApiHandler
+from chat.configuration import build_chat_service, ChatConfigurationService
+from repositories.chat_configuration import EnvChatConfigurationRepository
+from pathlib import Path
 
 HOST = "127.0.0.1"
 PORT = 9004
@@ -89,7 +92,7 @@ def _startup_integer(name: str, default: int, minimum: int, maximum: int) -> int
     return value
 
 
-def create_server(host: str = HOST, port: int = PORT, repository: UserRepository | None = None, pattern_repository=None, research_repository=None, replay_evaluator=None, admin_pipeline_service=None, watchlist_repository=None, case_study_repository=None) -> ThreadingHTTPServer:
+def create_server(host: str = HOST, port: int = PORT, repository: UserRepository | None = None, pattern_repository=None, research_repository=None, replay_evaluator=None, admin_pipeline_service=None, watchlist_repository=None, case_study_repository=None, chat_service=None, chat_configuration_service=None) -> ThreadingHTTPServer:
     use_configured_database = repository is None
     dsn = os.getenv("DATABASE_URL")
     repository = repository or build_repository()
@@ -177,6 +180,15 @@ def create_server(host: str = HOST, port: int = PORT, repository: UserRepository
     ConfiguredApiHandler.admin_pipeline_service = admin_pipeline_service
     ConfiguredApiHandler.case_study_service = case_study_service
     ConfiguredApiHandler.case_study_pipeline = case_study_pipeline
+    if chat_service is None:
+        chat_service = build_chat_service(os.environ, pattern_service.search_securities)
+        if chat_configuration_service is None and use_configured_database:
+            chat_configuration_service = ChatConfigurationService(
+                EnvChatConfigurationRepository(Path(__file__).parent / ".env"), os.environ,
+                pattern_service.search_securities,
+            )
+    ConfiguredApiHandler.chat_service = chat_service
+    ConfiguredApiHandler.chat_configuration_service = chat_configuration_service
     return ThreadingHTTPServer((host, port), ConfiguredApiHandler)
 
 

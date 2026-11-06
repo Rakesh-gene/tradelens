@@ -1,0 +1,3 @@
+# Optional offline ontology validation tooling; runtime clients use stdlib HTTP.
+rdflib==7.1.4
+pyshacl==0.30.1

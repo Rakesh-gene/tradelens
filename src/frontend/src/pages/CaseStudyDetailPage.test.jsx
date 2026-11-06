@@ -27,5 +27,6 @@ describe('CaseStudyDetailPage', () => {
     expect(screen.getByText('+30%')).not.toBeNull()
     expect(screen.queryByRole('heading', { name: 'Pattern evidence available at detection' })).toBeNull()
     expect(screen.queryByText(/Gross.*P\/L/)).toBeNull()
+    expect(screen.queryByText(/^Engine |^Configuration |^Features |^Adjustments /)).toBeNull()
   })
 })

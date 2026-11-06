@@ -14,6 +14,16 @@ py -3.11 -m venv .venv
 
 The backend runs at `http://localhost:9004`.
 
+### Ontology-backed chat widget
+
+The authenticated UI includes a chat overlay for the equity's latest daily
+primary setup. It uses a real Ontop virtual RDF graph over PostgreSQL, Turtle
+ontology, R2RML mappings and a server-side Ollama connection using
+`gemma4:31b-cloud`. Free-form questions identify the equity without a fixed
+wording requirement. See the
+[ontology setup and verification guide](infra/ontology/README.md). Chat is
+disabled until configured; it does not add a `/chat` route.
+
 For local PostgreSQL, set `DATABASE_URL` in `src/backend/.env`. A ready-to-copy
 example is provided in `src/backend/.env.example`. On first startup, migrations
 create the application tables and the local administrator:

@@ -1,6 +1,21 @@
 # Positional Trading Pattern Engine — Low-Level Implementation Plan
 
 - **Plan version:** 1.0
+- **Chart confirmations:** `pattern_engine/chart_annotations.py` builds dated,
+  adjustment-matched pattern boxes/lines and recorded confirmation markers.
+  Chart pattern retrieval includes confirmations in range even when the original
+  detection predates the window. No detector, lifecycle or score rules change.
+- **Overview qualification:** `overview-qualified-v1` applies server-side
+  after complete lifecycle peer ranking and before pagination. Policy and
+  independent configuration live in `pattern_engine/overview_qualification.py`
+  and `configuration/overview.toml`; SQL lives in `repositories/overview_queries.py`.
+  Metadata includes policy/configuration versions and candidate/qualified counts.
+  See `overview_setup_qualification_plan.md` for accepted rules and validation.
+- **Ontology chat slice:** `chat/service.py` supports only `equity_setup_today`.
+  Ontop executes the registered SPARQL through Turtle/R2RML/lenses over read-only
+  migration-042 views. Ollama (`gemma4:31b-cloud`) identifies the equity from
+  free-form prompts and uses constrained grounding; calculations remain
+  authoritative engine output. Setup and limitations: `infra/ontology/README.md`.
 - **Sector rotation extension:** `sector-rotation-v1` reads same-session feature
   medians through `repositories/sector_rotation.py`; no migration or external
   feed is required. `pattern_engine/sector_rotation.py` owns zone classification

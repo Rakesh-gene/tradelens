@@ -33,7 +33,6 @@ export default function MarketIndexChart({ index }) {
         <polygon points={areaPoints} className="market-index__area" />
         <polyline points={points} className="market-index__line" />
       </svg>
-      <details className="market-index__data"><summary>View index values</summary><div className="market-index__table-wrap"><table><caption>{index.name} closing-price history</caption><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody>{series.map((point) => <tr key={point.date}><td>{formatMarketDate(point.date)}</td><td>{formatNumber(point.close)}</td></tr>)}</tbody></table></div></details>
     </> : <p className="market-index__empty">Index history is not available yet.</p>}
   </section>
 }

@@ -1,0 +1,19 @@
+{
+  "relations": [
+    {
+      "name": ["semantic", "equity"], "baseRelation": ["public", "chat_security_context"], "type": "BasicLens",
+      "uniqueConstraints": {"added": [{"name": "equity_identity", "determinants": ["isin"]}]},
+      "nonNullConstraints": {"added": ["isin", "symbol", "company_name"]}
+    },
+    {
+      "name": ["semantic", "setups"], "baseRelation": ["public", "chat_current_setups"], "type": "BasicLens",
+      "uniqueConstraints": {"added": [{"name": "snapshot_identity", "determinants": ["snapshot_id"]}, {"name": "instance_identity", "determinants": ["pattern_id"]}]},
+      "nonNullConstraints": {"added": ["snapshot_id", "pattern_id", "isin", "pattern_class", "pattern_type", "state", "data_as_of", "detected_date", "engine_version", "configuration_version", "feature_version", "adjustment_version"]}
+    },
+    {
+      "name": ["semantic", "scores"], "baseRelation": ["public", "chat_setup_scores"], "type": "BasicLens",
+      "uniqueConstraints": {"added": [{"name": "score_identity", "determinants": ["snapshot_id", "score_kind"]}]},
+      "nonNullConstraints": {"added": ["snapshot_id", "score_kind", "score_value"]}
+    }
+  ]
+}

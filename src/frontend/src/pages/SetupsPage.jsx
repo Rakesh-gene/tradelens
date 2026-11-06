@@ -89,7 +89,6 @@ export default function SetupsPage({ onNavigate, onUnauthorized }) {
     <PageIntro eyebrow="Active patterns" title="Setups" description="Explore positional setups and open any result to understand the price levels and signals behind it." date={resource.data?.dataAsOf || parsed.filters.asOf} />
     {parsed.corrected.length > 0 && <p className="status-banner" role="status">Unsupported {parsed.corrected.join(', ')} filters were removed.</p>}
     {compact ? <><button className="secondary-button filter-open" type="button" onClick={() => setDrawerOpen(true)}>Filters and sorting</button><PatternFilters drawer open={drawerOpen} filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} onClose={() => setDrawerOpen(false)} /></> : <PatternFilters filters={filters} facets={resource.data?.facets} onChange={change} onApply={apply} onClear={clear} />}
-    <p className="ranking-note">Scores rank setups within the same lifecycle state; they do not predict returns.</p>
     <ResourceState status={resource.status} error={resource.error} onRetry={resource.reload}>
       {resource.data && <>
         <p className="result-status" aria-live="polite">Showing {items.length} of {totalCount} securities · sorted {parsed.filters.direction === 'desc' ? 'highest' : 'lowest'} first by {parsed.filters.sort}</p>

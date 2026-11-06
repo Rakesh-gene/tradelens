@@ -37,6 +37,6 @@ export function MeasurementGrid({ values }) {
   return <dl className="measurement-grid">{entries.map(([key, value]) => <div key={key}><dt>{labelize(key)}</dt><dd>{formatMeasurementValue(value)}</dd></div>)}</dl>
 }
 
-export function PageIntro({ eyebrow, title, description, date }) {
-  return <header className="page-intro"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{date && <div className="date-chip"><span>Data as of</span><strong>{formatMarketDate(date)}</strong></div>}</header>
+export function PageIntro({ eyebrow, title, description, date, dateLabel = 'Data as of' }) {
+  return <header className="page-intro"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{date && <div className="date-chip"><span>{dateLabel}</span><strong>{formatMarketDate(date)}</strong></div>}</header>
 }

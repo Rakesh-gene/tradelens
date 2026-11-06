@@ -1,0 +1,18 @@
+@prefix tl: <urn:tradelens:ontology:> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<urn:tradelens:security:INE002A01018> a tl:Equity ; tl:symbol "RELIANCE" ;
+    tl:companyName "Reliance Industries Limited" ; tl:asOfDate "2026-10-30"^^xsd:date ;
+    tl:featureDate "2026-10-30"^^xsd:date ; tl:patternDate "2026-10-30"^^xsd:date .
+<urn:tradelens:pattern:00000000-0000-4000-8000-000000000001> a tl:PatternInstance .
+<urn:tradelens:snapshot:fixture> a tl:BaseSnapshot ;
+    tl:aboutSecurity <urn:tradelens:security:INE002A01018> ;
+    tl:snapshotOf <urn:tradelens:pattern:00000000-0000-4000-8000-000000000001> ;
+    tl:patternId "00000000-0000-4000-8000-000000000001" ;
+    tl:hasPatternType <urn:tradelens:type:BASE-VCP> ; tl:lifecycleState tl:READY ;
+    tl:asOfDate "2026-10-30"^^xsd:date ; tl:detectedDate "2026-10-20"^^xsd:date ;
+    tl:hasScore <urn:tradelens:score:fixture:quality> ;
+    tl:engineVersion "fixture-engine" ; tl:configurationVersion "fixture-config" ;
+    tl:featureVersion "fixture-feature" ; tl:adjustmentVersion "fixture-adjustment" .
+<urn:tradelens:type:BASE-VCP> a tl:PatternType ; tl:canonicalCode "BASE-VCP" .
+<urn:tradelens:score:fixture:quality> a tl:QualityScore ;
+    tl:numericValue "90"^^xsd:decimal ; tl:unitCode "scorePoints" .

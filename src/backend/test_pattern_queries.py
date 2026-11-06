@@ -33,6 +33,26 @@ def _pattern(identifier="p1", state="READY", score="88"):
 
 
 class PatternQueryServiceTestCase(unittest.TestCase):
+    def test_overview_pages_all_ranked_equities_with_the_same_filters(self):
+        patterns = [{**_pattern(f"p{index}", "READY", str(Decimal(99) - Decimal(index) / 5)), "isin": f"EQ{index}"} for index in range(65)]
+        securities = [{"isin": f"EQ{index}", "symbol": f"EQ{index}", "company_name": f"Equity {index}", "series": "EQ"} for index in range(65)]
+        features = [{"isin": f"EQ{index}", "trading_date": _DATE, "feature_version": "fv1", "data_version": "av1"} for index in range(65)]
+        bars = [{"isin": f"EQ{index}", "trading_date": _DATE, "adjustment_version": "av1", "close_price": Decimal(98)} for index in range(65)]
+        service = PatternQueryService(InMemoryPatternQueryRepository(patterns=patterns, securities=securities, features=features, bars=bars))
+        first = service.overview({"asOf": [_DATE.isoformat()], "top": ["6"]})
+        import json
+        fixture = json.loads((Path(__file__).resolve().parents[1] / "frontend/test/fixtures/pattern-engine-contracts.json").read_text())
+        self.assertEqual(set(fixture["overview"]), set(first))
+        second = service.overview({"asOf": [first["dataAsOf"]], "top": ["6"], "cursor": [first["nextCursor"]]})
+        third = service.overview({"asOf": [first["dataAsOf"]], "top": ["6"], "cursor": [second["nextCursor"]]})
+        self.assertEqual([6, 6, 1], [len(page["topSetups"]) for page in (first, second, third)])
+        self.assertIsNone(third["nextCursor"])
+        self.assertEqual(65, first["qualification"]["candidateCount"])
+        self.assertEqual(13, first["qualification"]["qualifiedCount"])
+        self.assertEqual([f"p{index}" for index in range(13)], [item["patternInstanceId"] for page in (first, second, third) for item in page["topSetups"]])
+        with self.assertRaises(ValueError):
+            service.overview({"cursor": ["invalid"]})
+
     def setUp(self):
         self.repository = InMemoryPatternQueryRepository(
             patterns=[_pattern(), _pattern("p2", "TRIGGERED", "70")],
@@ -51,7 +71,12 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         )
         self.service = PatternQueryService(self.repository)
 
+    def prepare_overview_evidence(self):
+        self.repository.features[0].update(feature_version="fv1", data_version="av1")
+        self.repository.bars.append({**self.repository.bars[0], "trading_date": _DATE})
+
     def test_overview_returns_ranked_contract_and_numeric_browser_payload(self):
+        self.prepare_overview_evidence()
         payload = browser_payload(self.service.overview({"asOf": [_DATE.isoformat()]}))
         self.assertEqual(_DATE.isoformat(), payload["dataAsOf"])
         self.assertEqual(1, len(payload["topSetups"]))
@@ -71,6 +96,28 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 0 and 100"):
             self.service.setups({"minSetupScore": ["101"]})
 
+    def test_current_setups_exclude_retained_older_signals_before_ranking_and_filters(self):
+        self.prepare_overview_evidence()
+        old = _pattern("old-ath", "CONFIRMED", "99")
+        old.update(last_updated_date=_DATE - timedelta(days=10), pattern_type="BRK-ATH")
+        self.repository.patterns.append(old)
+        for sort in ("setupScore", "distanceToPivotPct"):
+            result = self.service.setups({"asOf": [_DATE.isoformat()], "sort": [sort]})
+            self.assertEqual(["p2"], [item["patternInstanceId"] for item in result["items"]])
+            self.assertEqual(1, result["totalCount"])
+            self.assertEqual(0, next(item["count"] for item in result["facets"]["patternTypes"] if item["value"] == "BRK-ATH"))
+        filtered = self.service.setups({"asOf": [_DATE.isoformat()], "patternType": ["BRK-ATH"]})
+        self.assertEqual([], filtered["items"])
+        self.assertEqual(["p2"], [item["patternInstanceId"] for item in self.service.overview({"asOf": [_DATE.isoformat()]})["topSetups"]])
+        self.assertEqual("old-ath", self.service.pattern("old-ath")["pattern"]["patternInstanceId"])
+
+    def test_newer_features_hide_unevaluated_setups_without_future_data_leakage(self):
+        self.repository.features.append({"isin": "INE000000001", "trading_date": _DATE + timedelta(days=1)})
+        current = self.service.setups({"asOf": [(_DATE + timedelta(days=1)).isoformat()]})
+        self.assertEqual([], current["items"])
+        historical = self.service.setups({"asOf": [_DATE.isoformat()]})
+        self.assertEqual(["p2"], [item["patternInstanceId"] for item in historical["items"]])
+
     def test_setups_default_to_setup_group_while_scanner_can_search_all_groups(self):
         reversal = _pattern("reversal", "READY", "95")
         reversal.update(
@@ -85,6 +132,7 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertIn("reversal", [item["patternInstanceId"] for item in scanner["items"]])
 
     def test_setups_and_top_setups_exclude_indices_and_non_eq_series(self):
+        self.prepare_overview_evidence()
         index = _pattern("index", "READY", "99")
         index["isin"] = "INDEX0000001"
         be_security = _pattern("be", "READY", "98")
@@ -162,6 +210,29 @@ class PatternQueryServiceTestCase(unittest.TestCase):
         self.assertEqual(2, len(detail["allEvidence"]))
         self.assertEqual("WAIT_FOR_BREAKOUT", detail["decision"]["action"])
         self.assertEqual(Decimal("12.00"), detail["decision"]["levels"]["riskFromTriggerPct"])
+
+    def test_pattern_reports_newer_data_without_rewriting_setup_evidence(self):
+        latest = _DATE + timedelta(days=30)
+        self.repository.features.append({
+            "isin": "INE000000001", "trading_date": latest,
+            "close_price": Decimal("110"),
+        })
+        payload = self.service.pattern("p1")
+
+        self.assertEqual(_DATE, payload["dataAsOf"])
+        self.assertEqual(latest, payload["latestDataAsOf"])
+        self.assertTrue(payload["hasNewerData"])
+        self.assertTrue(payload["isStale"])
+        self.assertEqual(Decimal("98"), payload["pattern"]["lastClose"])
+        self.assertEqual(_DATE, payload["pattern"]["lastUpdatedDate"])
+        chart = self.service.chart("p1", {})
+        self.assertTrue(all(bar["date"] <= _DATE for bar in chart["candles"]))
+
+    def test_pattern_does_not_claim_newer_data_when_features_are_missing(self):
+        self.repository.features.clear()
+        payload = self.service.pattern("p1")
+        self.assertIsNone(payload["latestDataAsOf"])
+        self.assertFalse(payload["hasNewerData"])
 
     def test_fingerprint_uses_best_scored_non_failure_signal_when_no_primary_setup_exists(self):
         trend = _pattern("trend-1", "DETECTED", "64")
@@ -290,12 +361,15 @@ class PatternQueryPerformanceRegressionTestCase(unittest.TestCase):
         repository = CapturingPatternQueryRepository()
         filters = _default_filters(_DATE)
         filters["equities_only"] = True
+        filters["latest_only"] = True
         for sort in ("setupScore", "distanceToPivotPct"):
             filters["sort"] = sort
             repository.list_setups(filters, 25, 0)
             statement = repository.statements[-1]
             self.assertIn("eligible.series = 'EQ'", statement)
             self.assertLess(statement.index("eligible.series = 'EQ'"), statement.index("best_fit_pool AS"))
+            self.assertLess(statement.index("newer.last_updated_date > p.last_updated_date"), statement.index("best_fit_pool AS"))
+            self.assertIn("newer_feature.trading_date > p.last_updated_date", statement)
 
         repository.setup_facets(_DATE, equities_only=True)
         self.assertTrue(all("eligible.series = 'EQ'" in statement for statement in repository.statements[-6:]))

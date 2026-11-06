@@ -6,6 +6,7 @@ import json
 from uuid import UUID
 from pattern_engine.positional_performance import calculate_positional_performance
 from pattern_engine.enums import SETUP_PATTERN_TYPES
+from pattern_engine.chart_annotations import pattern_annotations
 
 ALLOWED_FILTERS = {"q", "isin", "sector", "patternClass", "patternType", "variant", "timeframe", "direction", "fromDate", "toDate", "exitReason", "outcome", "marketRegime", "minSetupScore", "sort", "directionOrder", "cursor", "pageSize"}
 SORTS = {"detectionDate", "entryDate", "netPnl", "netReturnPct", "netRMultiple", "setupScore"}
@@ -57,8 +58,12 @@ class CaseStudyService:
         levels = {"pivot": row.get("pivot_price"), "support": row.get("support_price"), "invalidation": row.get("invalidation_price"), "entry": row.get("entry_price")}
         evidence = [{"patternInstanceId": str(row["id"]), "patternType": row.get("pattern_type"), "variant": row.get("variant"), "state": row.get("lifecycle_state"), "detectedDate": row.get("detection_date"), "pivotPrice": row.get("pivot_price"), "supportPrice": row.get("support_price"), "invalidationPrice": row.get("invalidation_price"), "measurements": row.get("measurements") or {}}]
         performance = row.get("_positional_performance") or {}
+        snapshot_date = row.get("confirmation_date") or row["detection_date"]
+        pattern_row = {**row, "start_date": row.get("pattern_start_date"), "last_updated_date": snapshot_date,
+                       "state": row.get("lifecycle_state"), "adjustment_version": lineage.get("adjustmentVersion")}
+        structures = pattern_annotations([pattern_row], bars, snapshot_date, lineage.get("adjustmentVersion"), row["id"])
         milestones = [{"date": value.get("observationDate"), "label": key, "returnPct": value.get("returnPct"), "complete": value.get("complete")} for key, value in (performance.get("horizons") or {}).items() if value.get("observationDate")]
-        return {"caseStudyId": str(row["id"]), "candles": candles, "annotations": annotations, "levels": levels, "markerDate": row.get("detection_date"), "evidence": evidence, "milestones": milestones, **_lineage(row)}
+        return {"caseStudyId": str(row["id"]), "candles": candles, "annotations": annotations, "patternAnnotations": structures, "levels": levels, "markerDate": row.get("detection_date"), "evidence": evidence, "milestones": milestones, **_lineage(row)}
 
     def facets(self):
         source = self._repository.facets()

@@ -5,6 +5,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
+from uuid import uuid4
+from chat.errors import ChatError
 
 from auth.service import AuthService
 from pattern_engine.query_service import PatternQueryService, browser_payload
@@ -21,6 +23,56 @@ class ApiHandler(BaseHTTPRequestHandler):
     admin_pipeline_service: Any
     case_study_service: CaseStudyService
     case_study_pipeline: Any
+    chat_service: Any
+    chat_configuration_service: Any
+
+    def _chat_configuration(self, *, save=False):
+        request_id = str(uuid4())
+        user = self._authorize_admin()
+        if user is None:
+            return
+        try:
+            if self.chat_configuration_service is None:
+                raise ChatError("CONFIGURATION_UNAVAILABLE", "Chat configuration is not available in this server instance.")
+            if save:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > 32768:
+                    raise ValueError("Configuration is too large.")
+                _, settings = self.chat_configuration_service.save(self._read_json())
+            else:
+                settings = self.chat_configuration_service.get()
+        except ChatError as error:
+            self._send_json(HTTPStatus(error.status), {"error": {"code": error.code, "message": str(error), "requestId": request_id}})
+            return
+        except (ValueError, TypeError, UnicodeError) as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": {"code": "INVALID_CONFIGURATION", "message": str(error), "requestId": request_id}})
+            return
+        self._send_json(HTTPStatus.OK, {"configuration": settings, "requestId": request_id})
+
+    def _chat_request(self, *, submit=False):
+        request_id = str(uuid4())
+        try:
+            user = self.service.current_user(self._access_token())
+        except ValueError:
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": {"code": "UNAUTHORIZED", "message": "A valid session is required.", "requestId": request_id}})
+            return
+        try:
+            service = self.chat_configuration_service.chat_service if self.chat_configuration_service else self.chat_service
+            if submit:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > 32768:
+                    raise ValueError("The chat request must be at most 32768 bytes.")
+                payload = service.answer(self._read_json(), str(user["id"]))
+            else:
+                payload = service.capabilities()
+        except ChatError as error:
+            self.log_message("chat_request_failed requestId=%s code=%s", request_id, error.code)
+            self._send_json(HTTPStatus(error.status), {"error": {"code": error.code, "message": str(error), "requestId": request_id}})
+            return
+        except (ValueError, TypeError, UnicodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": {"code": "INVALID_CHAT_REQUEST", "message": "Ask a current setup question of at most 4000 characters, including the equity name or page context.", "requestId": request_id}})
+            return
+        self._send_json(HTTPStatus.OK, {**payload, "requestId": request_id})
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(browser_payload(payload)).encode("utf-8")
@@ -47,6 +99,12 @@ class ApiHandler(BaseHTTPRequestHandler):
         parsed = urlsplit(self.path)
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query, keep_blank_values=True)
+        if path == "/api/chat/capabilities":
+            self._chat_request()
+            return
+        if path == "/api/admin/chat/configuration":
+            self._chat_configuration()
+            return
         if path == "/api/health":
             self._send_json(
                 HTTPStatus.OK,
@@ -164,6 +222,9 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
+        if path == "/api/admin/chat/configuration":
+            self._chat_configuration(save=True)
+            return
         if path != "/api/profile":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
@@ -232,6 +293,9 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = self.path.split("?", maxsplit=1)[0].rstrip("/") or "/"
         parts = path.strip("/").split("/")
+        if path == "/api/chat/messages":
+            self._chat_request(submit=True)
+            return
         if path == "/api/watchlist":
             try:
                 user = self.service.current_user(self._access_token())

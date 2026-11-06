@@ -29,6 +29,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="Show import, source, anomaly, and calculation-lag status")
+    ontology = commands.add_parser("ontology", help="Configure or verify the read-only Ontop chat graph")
+    ontology.add_argument("action", choices=["configure", "verify"])
+    ontology.add_argument("--symbol", default="RELIANCE")
     coverage = commands.add_parser("validate-coverage", help="Find and optionally persist missing-session anomalies")
     coverage.add_argument("--from-date", type=_date); coverage.add_argument("--to-date", type=_date)
     coverage.add_argument("--limit", type=int, default=5000); coverage.add_argument("--no-persist", action="store_true")
@@ -62,6 +65,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     resume = commands.add_parser("resume-backtest", help="Resume the unprocessed suffix of a failed backtest as a linked run")
     resume.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
+    if args.command == "ontology":
+        from chat.cli import configure, verify
+        try:
+            configure() if args.action == "configure" else verify(args.symbol)
+        except Exception:
+            raise SystemExit("Ontology operation failed. Check database/service availability and local configuration.") from None
+        return 0
     dependencies = _dependencies()
     try:
         if args.command == "status": result = dependencies["monitor"].status()

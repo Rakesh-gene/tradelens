@@ -213,6 +213,10 @@ External exchange behavior is isolated in `data_pipeline/`.
 - Detection state and opportunity ranking are separate concerns. Rank only
   active lifecycle states (`DETECTED` through `CONFIRMED`); terminal states are
   retained as evidence but excluded from best-fit ranking.
+- Setups and Overview opportunities include only evidence from each security's
+  latest available evaluation at or before the requested date. Exclude older
+  retained patterns before filters, ranking, counts and facets, including when
+  newer features exist but pattern processing has not caught up.
 - Compare best-fit candidates within the same lifecycle state. Do not make an
   early forming structure compete directly with a triggered or confirmed one.
 - `best-fit-v1` combines the persisted setup score (75%), context score (10%),
@@ -494,19 +498,47 @@ The normal route set is `/`, `/signup`, `/overview`, `/sector-rotation`, `/setup
 
 ### Market-product presentation
 
+- Do not display engine, configuration, feature or adjustment version labels
+  anywhere in the application, including security pages, case studies and AI
+  responses. Retain lineage in persistence/API contracts for reproducibility;
+  keep user-facing evidence dates and stale/partial labels visible.
+
 - `OverviewPage` shows EOD freshness/pipeline status, market regime and breadth,
   counts by lifecycle state, top-ranked setups, and the ranking disclaimer.
+  Overview appends ranked setups in six-result batches through a bottom Load
+  more action. `/api/overview` accepts an opaque `cursor` and returns nullable
+  `nextCursor`; subsequent batches preserve the initial evidence date via `asOf`.
+  Only `overview-qualified-v1` results appear: same-state percentile >=80,
+  best fit >=70, quality >=70, context >=40, full liquidity pass, current
+  version-matched evidence, and adjusted close above positive invalidation.
+  Policy settings live in `configuration/overview.toml`, independently of
+  detector configuration. Compute peers before qualification and apply
+  qualification before counts/pagination; never backfill with weaker results.
 - `SetupsPage` uses a server-sorted table on desktop and equivalent cards on
   mobile. Filters and pagination must remain reproducible from the URL.
-- `PatternDetailPage` shows security identity, state/dates, four separate score
-  categories, measurements, pivot/support/invalidation, supporting evidence,
-  adjusted chart, event timeline, and lineage.
+- `PatternDetailPage` shows security identity and evidence date, then the adjusted
+  chart, concise decision intelligence, and a compact latest-security link at
+  the bottom. History promotion, detailed evidence/scores/lifecycle and version
+  labels are removed from this page by product decision. Keep that evidence
+  in backend contracts and persistence; do not request events the page does not use.
+- Pattern detail is a dated setup snapshot. Label its evidence date explicitly,
+  show the server's newer-data status, and link to the current symbol overview;
+  never imply an old setup's scores or chart describe the latest session.
 - `SecurityPage` implements the standardized technical fingerprint: trend,
   primary setup, state/maturity, compression, momentum, RS, volume, location,
   context, scores, active patterns, and recent events.
 - Charts consume adjusted/downsampled server series. They may compute SVG pixel
   coordinates but no financial values. Supply a keyboard-accessible textual or
   tabular alternative and never rely on color alone.
+  Pattern charts mark persisted confirmation dates rather than every detection.
+  `pattern_engine/chart_annotations.py` supplies version-matched, dated boxes
+  and lines in `patternAnnotations`; the client only maps these values to pixels.
+  Draw the selected structure. Security charts focus the fingerprint's current
+  primary setup, including unconfirmed bases; only fall back to the latest
+  recorded confirmation when no active primary exists. `focusedPatternId` keeps
+  the displayed structure and reference levels aligned with that selection.
+  Never infer an entry confirmation from state, score or trigger alone; retain
+  historical confirmations with their current recorded state, including failures.
 - Format INR and Indian-number grouping with `Intl.NumberFormat('en-IN')`.
   A server field ending in `Pct` already contains percentage points: `1.7`
   displays as `1.7%`, not `170%`.
@@ -628,6 +660,34 @@ the exact PID and require the user to run the script from an Administrator
 PowerShell; do not silently claim the restart succeeded.
 
 ## Completion checklist
+
+### Ontology chat
+
+- The shell's Chat widget opens a modal overlay; never add a `/chat` page.
+- The first enabled intent is only `equity_setup_today`. Extend the versioned
+  ontology catalog, mappings, query tests and answer contract together for new
+  capabilities; Gemini must not execute arbitrary SPARQL or SQL.
+- Chat questions may name the equity naturally; resolve names server-side and
+  clarify ambiguity. Do not require a separate symbol input. Chat Settings is
+  administrator-only at `/api/admin/chat/configuration`; keys are write-only,
+  persisted through the configuration repository and hot-applied to chat only.
+- `ontology/` owns vocabulary, RDF facts and SHACL shapes;
+  `repositories/semantic/` owns R2RML, lenses and registered SPARQL. PostgreSQL
+  views are append-only migrations. Ontop has a read-only view-scoped role.
+- Preserve actual evidence dates and missing/lagging evaluation warnings. No
+  API-only fallback may be presented as ontology-grounded output.
+  Default chat provider is Ollama (`CHAT_PROVIDER=ollama`) using
+  `gemma4:31b-cloud` through the local Ollama daemon. It uses cloud inference.
+  Accept free-form wording through model-based equity identification; retain
+  payload, symbol, evidence and citation validation. Current evidence remains
+  the latest daily setup capability. Gemini is an optional provider.
+  If the model is unavailable after successful Ontop retrieval and validation,
+  preserve graph facts only with `ontologyEvidenceOnly` provenance, null model,
+  provider error code, partial flag and an explicit no-LLM-explanation warning.
+- Run setup/verification through `python -m operations.cli ontology` from
+  `src/backend`; see `infra/ontology/README.md`. Live integration is opt-in.
+- Rebuild Ontop and restart the backend together after semantic artifact changes.
+- Keep Gemini keys and generated `infra/ontology/.env` out of tracked files.
 
 Before handing off a change, confirm the following as applicable:
 

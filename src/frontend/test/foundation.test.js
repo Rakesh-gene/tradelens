@@ -23,7 +23,10 @@ test('session helper owns access-token storage', () => {
 
 test('contract fixture freezes every Phase 0 response family', async () => {
   const fixture = JSON.parse(await readFile(new URL('./fixtures/pattern-engine-contracts.json', import.meta.url), 'utf8'))
-  assert.deepEqual(Object.keys(fixture), ['error', 'freshness', 'setupSummary', 'patternDetail', 'event', 'fingerprint', 'chart'])
+  assert.deepEqual(Object.keys(fixture), ['error', 'overview', 'freshness', 'setupSummary', 'patternDetail', 'event', 'fingerprint', 'chart'])
+  assert.equal(fixture.overview.nextCursor, null)
+  assert.equal(fixture.chart.patternAnnotations[0].confirmationDate, '2026-09-04')
+  assert.equal(fixture.chart.patternAnnotations[0].shapes[0].kind, 'box')
   assert.equal(fixture.setupSummary.security.isin, fixture.fingerprint.security.isin)
   assert.equal(fixture.chart.adjusted, true)
 })

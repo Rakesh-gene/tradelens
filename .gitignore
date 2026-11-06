@@ -3,6 +3,7 @@ src/frontend/.npm-cache/
 src/frontend/dist/
 src/backend/.venv/
 src/backend/.env
+src/backend/.chat-config-*
 .backend.pid
 .frontend.pid
 backend.log
@@ -13,4 +14,6 @@ __pycache__/
 *.py[cod]
 .chrome-preview/
 .edge-preview/
+infra/ontology/.env
+.ontology-tools/
 .DS_Store

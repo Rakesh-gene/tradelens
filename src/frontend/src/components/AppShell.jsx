@@ -3,8 +3,9 @@ import NavigationLink from './NavigationLink.jsx'
 import SecuritySearch from './SecuritySearch.jsx'
 import SiteFooter from './SiteFooter.jsx'
 import LoginDisclaimer from './LoginDisclaimer.jsx'
+import ChatWidget from './chat/ChatWidget.jsx'
 
-export default function AppShell({ children, user, onNavigate, onSignOut, onWatchlistChanged, showLoginDisclaimer, onDismissLoginDisclaimer }) {
+export default function AppShell({ children, user, onNavigate, onSignOut, onWatchlistChanged, showLoginDisclaimer, onDismissLoginDisclaimer, chatSymbol, chatPatternId }) {
   const accountInitial = user?.email?.trim()?.charAt(0).toUpperCase() || 'U'
   return <div className="product-shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
@@ -37,5 +38,6 @@ export default function AppShell({ children, user, onNavigate, onSignOut, onWatc
     </header>
     <main id="main-content" className="product-content">{children}</main>
     <SiteFooter />
+    <ChatWidget key={user?.id || user?.email} contextSymbol={chatSymbol} contextPatternId={chatPatternId} onNavigate={onNavigate} onUnauthorized={onSignOut} isAdmin={Boolean(user?.isAdmin || user?.is_admin)} />
   </div>
 }

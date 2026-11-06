@@ -1,0 +1,49 @@
+@prefix tl: <urn:tradelens:ontology:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tradelens:ontology> a owl:Ontology ; owl:versionInfo "1.0.0" ;
+    rdfs:comment "TradeLens EOD evidence ontology. No readiness or investment conclusions are inferred." .
+tl:Security a owl:Class ; rdfs:comment "An instrument identified internally by stable ISIN." .
+tl:Equity a owl:Class ; rdfs:subClassOf tl:Security .
+tl:PatternInstance a owl:Class ; rdfs:comment "A deduplicated detected structure with a stable pattern UUID." .
+tl:PatternSnapshot a owl:Class .
+tl:PrimarySetupSnapshot a owl:Class ; rdfs:subClassOf tl:PatternSnapshot ;
+    rdfs:comment "Dated retained evidence for a primary base, breakout or pullback; not a historical reconstruction." .
+tl:BaseSnapshot a owl:Class ; rdfs:subClassOf tl:PrimarySetupSnapshot .
+tl:BreakoutSnapshot a owl:Class ; rdfs:subClassOf tl:PrimarySetupSnapshot .
+tl:PullbackSnapshot a owl:Class ; rdfs:subClassOf tl:PrimarySetupSnapshot .
+tl:LifecycleState a owl:Class ; rdfs:comment "The engine-persisted lifecycle state at the snapshot evidence date." .
+tl:PatternType a owl:Class .
+tl:ScoreObservation a owl:Class .
+tl:QualityScore a owl:Class ; rdfs:subClassOf tl:ScoreObservation ; rdfs:comment "The persisted quality of pattern geometry on a 0-100 scale." .
+tl:MaturityScore a owl:Class ; rdfs:subClassOf tl:ScoreObservation ; rdfs:comment "The persisted degree of structural development on a 0-100 scale." .
+tl:ContextScore a owl:Class ; rdfs:subClassOf tl:ScoreObservation ; rdfs:comment "The persisted market and sector context evidence on a 0-100 scale." .
+tl:SetupScore a owl:Class ; rdfs:subClassOf tl:ScoreObservation ;
+    rdfs:comment "Ranks evidence; never a win probability or expected return." .
+tl:HistoricalProbabilityEstimate a owl:Class .
+tl:snapshotOf a owl:ObjectProperty ; rdfs:domain tl:PatternSnapshot ; rdfs:range tl:PatternInstance .
+tl:aboutSecurity a owl:ObjectProperty ; rdfs:domain tl:PatternSnapshot ; rdfs:range tl:Security .
+tl:lifecycleState a owl:ObjectProperty ; rdfs:range tl:LifecycleState .
+tl:hasPatternType a owl:ObjectProperty ; rdfs:range tl:PatternType .
+tl:hasScore a owl:ObjectProperty ; rdfs:range tl:ScoreObservation .
+tl:symbol a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:companyName a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:canonicalCode a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:patternId a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:variant a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:asOfDate a owl:DatatypeProperty ; rdfs:range xsd:date .
+tl:featureDate a owl:DatatypeProperty ; rdfs:range xsd:date .
+tl:patternDate a owl:DatatypeProperty ; rdfs:range xsd:date .
+tl:detectedDate a owl:DatatypeProperty ; rdfs:range xsd:date .
+tl:timeframe a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:numericValue a owl:DatatypeProperty ; rdfs:range xsd:decimal .
+tl:unitCode a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:pivotPrice a owl:DatatypeProperty ; rdfs:range xsd:decimal .
+tl:supportPrice a owl:DatatypeProperty ; rdfs:range xsd:decimal .
+tl:invalidationPrice a owl:DatatypeProperty ; rdfs:range xsd:decimal .
+tl:engineVersion a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:configurationVersion a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:featureVersion a owl:DatatypeProperty ; rdfs:range xsd:string .
+tl:adjustmentVersion a owl:DatatypeProperty ; rdfs:range xsd:string .

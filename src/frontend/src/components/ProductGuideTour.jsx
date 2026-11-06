@@ -41,5 +41,23 @@ export default function ProductGuideTour({ active, stepIndex, pathname, onStepIn
     if (next < 0 || next >= steps.length) { onFinish(); return }
     onStepIndexChange(next)
   }
-  return <Joyride continuous run={active && targetReady} stepIndex={stepIndex} steps={steps} onEvent={callback} options={{ arrowColor: 'rgb(20 17 12)', backgroundColor: 'rgb(20 17 12)', overlayColor: 'rgb(0 0 0 / 0.68)', primaryColor: '#ffdf84', textColor: '#f6ecd6', zIndex: 10000, showProgress: true, skipBeacon: true, scrollOffset: 96, locale: { back: 'Back', close: 'Close', last: 'Finish', next: 'Next', skip: 'Skip tour' } }} />
+  return <Joyride
+    continuous run={active && targetReady} stepIndex={stepIndex} steps={steps} onEvent={callback}
+    options={{
+      arrowColor: 'var(--color-surface-panel)',
+      backgroundColor: 'var(--color-surface-panel)',
+      overlayColor: 'rgb(0 0 0 / 0.68)',
+      primaryColor: 'var(--color-accent)',
+      textColor: 'var(--color-text-primary)',
+      zIndex: 10000,
+      showProgress: true,
+      skipBeacon: true,
+      scrollOffset: 96,
+      locale: { back: 'Back', close: 'Close', last: 'Finish', next: 'Next', skip: 'Skip tour' },
+    }}
+    styles={{
+      tooltip: { border: 'var(--border-control)', borderRadius: 'var(--radius-xl)' },
+      buttonPrimary: { color: 'var(--color-text-on-accent)' },
+    }}
+  />
 }

@@ -1,0 +1,29 @@
+PREFIX tl: <urn:tradelens:ontology:>
+SELECT DISTINCT ?security ?symbol ?name ?dataAsOf ?featureDate ?patternDate
+  ?snapshot ?patternId ?patternType ?variant ?state ?evidenceDate ?detectedDate
+  ?quality ?maturity ?context ?setup ?pivot ?support ?invalidation
+  ?engineVersion ?configurationVersion ?featureVersion ?adjustmentVersion
+WHERE {
+  ?security a tl:Equity ; tl:symbol __SYMBOL__ ; tl:symbol ?symbol ; tl:companyName ?name .
+  OPTIONAL { ?security tl:asOfDate ?dataAsOf }
+  OPTIONAL { ?security tl:featureDate ?featureDate }
+  OPTIONAL { ?security tl:patternDate ?patternDate }
+  OPTIONAL {
+    ?snapshot a tl:PrimarySetupSnapshot ; tl:aboutSecurity ?security ; tl:patternId ?patternId ;
+      tl:hasPatternType ?type ; tl:lifecycleState ?state ; tl:asOfDate ?evidenceDate ;
+      tl:detectedDate ?detectedDate ; tl:engineVersion ?engineVersion ;
+      tl:configurationVersion ?configurationVersion ; tl:featureVersion ?featureVersion ;
+      tl:adjustmentVersion ?adjustmentVersion .
+    ?type tl:canonicalCode ?patternType .
+    OPTIONAL { ?snapshot tl:variant ?variant }
+    OPTIONAL { ?snapshot tl:hasScore ?q . ?q a tl:QualityScore ; tl:numericValue ?quality }
+    OPTIONAL { ?snapshot tl:hasScore ?m . ?m a tl:MaturityScore ; tl:numericValue ?maturity }
+    OPTIONAL { ?snapshot tl:hasScore ?c . ?c a tl:ContextScore ; tl:numericValue ?context }
+    OPTIONAL { ?snapshot tl:hasScore ?s . ?s a tl:SetupScore ; tl:numericValue ?setup }
+    OPTIONAL { ?snapshot tl:pivotPrice ?pivot }
+    OPTIONAL { ?snapshot tl:supportPrice ?support }
+    OPTIONAL { ?snapshot tl:invalidationPrice ?invalidation }
+  }
+}
+ORDER BY ?patternId
+LIMIT 26

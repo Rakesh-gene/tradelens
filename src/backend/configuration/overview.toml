@@ -1,0 +1,8 @@
+# Qualification only: does not change detector geometry or best-fit weights.
+# Bump policy_version when changing the interpretation of a rule.
+policy_version = "overview-qualified-v1"
+minimum_peer_percentile = 80
+minimum_best_fit = 70
+minimum_quality = 70
+minimum_context = 40
+required_liquidity = 100

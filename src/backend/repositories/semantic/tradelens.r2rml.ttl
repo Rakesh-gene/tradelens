@@ -1,0 +1,77 @@
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+@prefix tl: <urn:tradelens:ontology:> .
+@prefix map: <urn:tradelens:mapping:> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+map:Equity a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.equity" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:security:{isin}" ; rr:class tl:Equity ] ;
+    rr:predicateObjectMap [ rr:predicate tl:symbol ; rr:objectMap [ rr:column "symbol" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:companyName ; rr:objectMap [ rr:column "company_name" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:asOfDate ; rr:objectMap [ rr:column "data_as_of" ; rr:datatype xsd:date ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:featureDate ; rr:objectMap [ rr:column "feature_date" ; rr:datatype xsd:date ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:patternDate ; rr:objectMap [ rr:column "pattern_date" ; rr:datatype xsd:date ] ] .
+
+map:Snapshot a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.setups" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:snapshot:{snapshot_id}" ] ;
+    rr:predicateObjectMap [ rr:predicate tl:snapshotOf ; rr:objectMap [ rr:template "urn:tradelens:pattern:{pattern_id}" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:patternId ; rr:objectMap [ rr:column "pattern_id" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:aboutSecurity ; rr:objectMap [ rr:template "urn:tradelens:security:{isin}" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:hasPatternType ; rr:objectMap [ rr:template "urn:tradelens:type:{pattern_type}" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:variant ; rr:objectMap [ rr:column "variant" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:lifecycleState ; rr:objectMap [ rr:template "urn:tradelens:ontology:{state}" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:asOfDate ; rr:objectMap [ rr:column "data_as_of" ; rr:datatype xsd:date ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:detectedDate ; rr:objectMap [ rr:column "detected_date" ; rr:datatype xsd:date ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:timeframe ; rr:objectMap [ rr:column "timeframe" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:pivotPrice ; rr:objectMap [ rr:column "pivot_price" ; rr:datatype xsd:decimal ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:supportPrice ; rr:objectMap [ rr:column "support_price" ; rr:datatype xsd:decimal ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:invalidationPrice ; rr:objectMap [ rr:column "invalidation_price" ; rr:datatype xsd:decimal ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:engineVersion ; rr:objectMap [ rr:column "engine_version" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:configurationVersion ; rr:objectMap [ rr:column "configuration_version" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:featureVersion ; rr:objectMap [ rr:column "feature_version" ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:adjustmentVersion ; rr:objectMap [ rr:column "adjustment_version" ] ] .
+
+map:Pattern a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.setups" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:pattern:{pattern_id}" ; rr:class tl:PatternInstance ] .
+
+map:PatternType a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.setups" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:type:{pattern_type}" ; rr:class tl:PatternType ] ;
+    rr:predicateObjectMap [ rr:predicate tl:canonicalCode ; rr:objectMap [ rr:column "pattern_type" ] ] .
+
+map:ScoreLink a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.scores" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:snapshot:{snapshot_id}" ] ;
+    rr:predicateObjectMap [ rr:predicate tl:hasScore ; rr:objectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ] ] .
+
+map:Score a rr:TriplesMap ;
+    rr:logicalTable [ rr:tableName "semantic.scores" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ] ;
+    rr:predicateObjectMap [ rr:predicate tl:numericValue ; rr:objectMap [ rr:column "score_value" ; rr:datatype xsd:decimal ] ] ;
+    rr:predicateObjectMap [ rr:predicate tl:unitCode ; rr:objectMap [ rr:constant "scorePoints" ] ] .
+
+# Static class assertions allow ontology query rewriting to expand subclasses.
+map:Base a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id FROM semantic.setups WHERE pattern_class = 'BASE'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:snapshot:{snapshot_id}" ; rr:class tl:BaseSnapshot ] .
+map:Breakout a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id FROM semantic.setups WHERE pattern_class = 'BREAKOUT'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:snapshot:{snapshot_id}" ; rr:class tl:BreakoutSnapshot ] .
+map:Pullback a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id FROM semantic.setups WHERE pattern_class = 'PULLBACK'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:snapshot:{snapshot_id}" ; rr:class tl:PullbackSnapshot ] .
+map:Quality a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id, score_kind FROM semantic.scores WHERE score_kind = 'QualityScore'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ; rr:class tl:QualityScore ] .
+map:Maturity a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id, score_kind FROM semantic.scores WHERE score_kind = 'MaturityScore'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ; rr:class tl:MaturityScore ] .
+map:Context a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id, score_kind FROM semantic.scores WHERE score_kind = 'ContextScore'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ; rr:class tl:ContextScore ] .
+map:Setup a rr:TriplesMap ;
+    rr:logicalTable [ rr:sqlQuery "SELECT snapshot_id, score_kind FROM semantic.scores WHERE score_kind = 'SetupScore'" ] ;
+    rr:subjectMap [ rr:template "urn:tradelens:score:{snapshot_id}:{score_kind}" ; rr:class tl:SetupScore ] .

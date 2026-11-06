@@ -70,7 +70,7 @@ export default function App() {
       return undefined
     }
 
-    setCheckingSession(true)
+    if (!user) setCheckingSession(true)
     setSessionError('')
     const controller = new AbortController()
     const validateSession = (initial = false) => {
@@ -166,5 +166,5 @@ export default function App() {
 
   page = <>{page}<ProductGuideTour active={guideTour.active} stepIndex={guideTour.stepIndex} pathname={window.location.pathname} onStepIndexChange={(stepIndex) => setGuideTour((current) => ({ ...current, stepIndex }))} onFinish={() => setGuideTour({ active: false, stepIndex: 0 })} /></>
 
-  return <AppShell user={user} onNavigate={navigate} onSignOut={signOut} onWatchlistChanged={() => setWatchlistRevision((value) => value + 1)} showLoginDisclaimer={showLoginDisclaimer} onDismissLoginDisclaimer={dismissLoginDisclaimer}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>
+  return <AppShell user={user} chatSymbol={route.name === 'security' ? route.params.symbol : ''} chatPatternId={route.name === 'pattern-detail' ? route.params.patternId : ''} onNavigate={navigate} onSignOut={signOut} onWatchlistChanged={() => setWatchlistRevision((value) => value + 1)} showLoginDisclaimer={showLoginDisclaimer} onDismissLoginDisclaimer={dismissLoginDisclaimer}><Suspense fallback={<section className="loading-panel" aria-busy="true"><p>Loading page…</p></section>}>{page}</Suspense></AppShell>
 }

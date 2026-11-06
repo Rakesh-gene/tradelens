@@ -1,0 +1,28 @@
+{
+  "intent": "equity_setup_today",
+  "question": "What is the setup this equity has today?",
+  "answer": "Recorded setup evidence.",
+  "security": {"symbol": "RELIANCE", "name": "Reliance", "href": "/securities/RELIANCE"},
+  "dataAsOf": "2026-10-30",
+  "requestedAsOf": "2026-11-01",
+  "generatedAt": "2026-11-01T10:00:00+00:00",
+  "requestId": "00000000-0000-4000-8000-000000000002",
+  "status": "answered",
+  "isStale": true,
+  "isPartial": true,
+  "warnings": ["Some evidence is missing."],
+  "engineVersion": "fixture-engine",
+  "configurationVersion": "fixture-config",
+  "setups": [{
+    "sourceId": "00000000-0000-4000-8000-000000000001",
+    "patternInstanceId": "00000000-0000-4000-8000-000000000001",
+    "patternType": "BASE-VCP", "variant": null, "state": "READY", "timeframe": "1D",
+    "dataAsOf": "2026-10-30", "detectedDate": "2026-10-20",
+    "scores": {"quality": 90, "maturity": null, "context": 70, "setup": 85},
+    "levels": {"pivot": 1500, "support": 1400, "invalidation": 1350},
+    "href": "/patterns/00000000-0000-4000-8000-000000000001",
+    "lineage": {"engineVersion": "fixture-engine", "configurationVersion": "fixture-config", "featureVersion": "fixture-features", "adjustmentVersion": "fixture-adjustments"}
+  }],
+  "provenance": {"queryId": "equity_setup_today", "mappingIds": ["Equity", "Snapshot", "ScoreLink", "Score"], "release": {"version": "1.0.0", "hashes": {}}, "model": "fake"},
+  "disclaimer": "Scores are not probabilities."
+}

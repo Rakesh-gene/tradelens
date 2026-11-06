@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef } from 'react'
-import { formatCompactNumber, formatMarketDate, formatPrice } from '../utils/formatters.js'
+import { formatMarketDate } from '../utils/formatters.js'
 import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers } from 'lightweight-charts'
-import { groupPatternDetections, patternChartGeometry } from '../utils/patternChartOverlays.js'
+import PatternShapePrimitive from '../utils/patternShapePrimitive.js'
 
-const number = (value) => Number.isFinite(Number(value)) ? Number(value) : null
+const number = (value) => value == null || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : null
 
 export default function PatternCandlestickChart({
   candles = [], levels = {}, evidence = [], corporateActions = [],
-  milestones = [], selectedPatternId, range, onRangeChange,
+  milestones = [], patternAnnotations = [], selectedPatternId, range, onRangeChange,
 }) {
   const container = useRef(null)
   const rows = useMemo(() => candles.map((item) => ({
@@ -15,11 +15,14 @@ export default function PatternCandlestickChart({
     close: number(item.close), volume: number(item.volume), ema20: number(item.ema20),
     sma50: number(item.sma50), sma200: number(item.sma200),
   })).filter((item) => item.time && [item.open, item.high, item.low, item.close].every((value) => value != null)), [candles])
-  const selectedPattern = useMemo(
-    () => selectedPatternId ? evidence.find((item) => item.patternInstanceId === selectedPatternId) : null,
-    [evidence, selectedPatternId],
+  const focusedPattern = useMemo(
+    () => selectedPatternId ? patternAnnotations.find((item) => item.patternInstanceId === selectedPatternId) : patternAnnotations.filter((item) => item.confirmationDate).at(-1),
+    [patternAnnotations, selectedPatternId],
   )
-  const detectionGroups = useMemo(() => groupPatternDetections(evidence, rows), [evidence, rows])
+  const confirmations = useMemo(() => {
+    const dates = new Set(rows.map((row) => row.time))
+    return patternAnnotations.filter((item) => item.confirmationDate && dates.has(item.confirmationDate))
+  }, [patternAnnotations, rows])
 
   useEffect(() => {
     if (!container.current || !rows.length) return undefined
@@ -65,15 +68,16 @@ export default function PatternCandlestickChart({
     })
 
     const visibleTimes = new Set(rows.map((row) => row.time))
-    const patternMarkers = detectionGroups.map(({ time, patterns }) => {
-      const includesSelected = patterns.some((item) => item.patternInstanceId === selectedPatternId)
-      const names = patterns.map((item) => item.variant || item.patternType)
-      const text = names.length === 1 ? names[0] : names.length === 2 ? names.join(' + ') : `${names.length} patterns`
-      return {
-        time, position: 'aboveBar', color: includesSelected ? '#77d9d0' : '#ffdf84',
-        shape: includesSelected ? 'arrowDown' : 'circle', text,
-      }
+    const byDate = new Map()
+    confirmations.filter((item) => !selectedPatternId || item.patternInstanceId === selectedPatternId).forEach((item) => {
+      const group = byDate.get(item.confirmationDate) || []
+      group.push(item); byDate.set(item.confirmationDate, group)
     })
+    const patternMarkers = [...byDate].map(([time, items]) => ({
+      time, position: items.every((item) => item.direction === 'BEARISH') ? 'aboveBar' : 'belowBar', color: '#77d9d0',
+      shape: items.every((item) => item.direction === 'BEARISH') ? 'arrowDown' : 'arrowUp',
+      text: `Entry confirmed · ${items.length > 1 ? `${items.length} setups` : items[0].variant || items[0].patternType}`,
+    }))
     const actionMarkers = corporateActions
       .filter((item) => item.exDate && visibleTimes.has(item.exDate))
       .map((item) => ({ time: item.exDate, position: 'belowBar', color: '#f28d3f', shape: 'square', text: item.actionType }))
@@ -81,39 +85,27 @@ export default function PatternCandlestickChart({
     const markers = [...patternMarkers, ...actionMarkers, ...milestoneMarkers].sort((left, right) => left.time.localeCompare(right.time))
     if (markers.length) createSeriesMarkers(series, markers)
 
-    const geometry = patternChartGeometry(selectedPattern, rows)
-    if (geometry) {
-      const overlay = chart.addSeries(LineSeries, {
-        title: geometry.title, color: '#77d9d0', lineWidth: 3,
-        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: true,
-      })
-      overlay.setData(geometry.points.map(({ time, value }) => ({ time, value })))
-      createSeriesMarkers(overlay, geometry.points.map(({ time, label }, index) => ({
-        time, position: index % 2 ? 'belowBar' : 'aboveBar',
-        color: '#77d9d0', shape: 'circle', text: label,
-      })))
-    }
+    if (focusedPattern?.shapes?.length) series.attachPrimitive(new PatternShapePrimitive(focusedPattern.shapes))
 
     chart.timeScale().fitContent()
     const observer = new ResizeObserver(([entry]) => chart.applyOptions({ width: entry.contentRect.width }))
     observer.observe(container.current)
     return () => { observer.disconnect(); chart.remove() }
-  }, [corporateActions, detectionGroups, levels, milestones, rows, selectedPattern, selectedPatternId])
+  }, [corporateActions, confirmations, levels, milestones, rows, focusedPattern, selectedPatternId])
 
   if (!rows.length) return <p className="muted-copy">No adjusted daily prices are available for this pattern version yet.</p>
-  const displayedCount = detectionGroups.reduce((count, group) => count + group.patterns.length, 0)
+  const visibleConfirmations = confirmations.filter((item) => !selectedPatternId || item.patternInstanceId === selectedPatternId)
+  const chartDescription = focusedPattern
+    ? `${focusedPattern.variant || focusedPattern.patternType}, recorded state ${focusedPattern.state}. ${focusedPattern.confirmationDate ? `Entry confirmed ${formatMarketDate(focusedPattern.confirmationDate)}.` : 'No recorded entry confirmation in this chart range.'} ${focusedPattern.shapes?.length ? 'Pattern structure shown.' : 'Stored pattern geometry is unavailable in this chart range.'}`
+    : 'Interactive adjusted candlestick price chart.'
   return <figure className="price-chart" aria-labelledby="price-chart-title">
     <figcaption>
-      <div><p className="eyebrow">Adjusted price action</p><h2 id="price-chart-title">Candlestick chart</h2><p>Every pattern found within this chart range is marked on its detection date. The selected pattern is highlighted in teal.</p></div>
+      <div><h2 id="price-chart-title">Candlestick chart</h2></div>
       <div className="price-chart__controls">
         {onRangeChange && <label>Chart range<select className="select-control" value={range} onChange={(event) => onRangeChange(event.target.value)}><option value="3m">3 months</option><option value="6m">6 months</option><option value="1y">1 year</option><option value="5y">5 years</option><option value="10y">10 years</option></select></label>}
-        <div className="price-chart__legend" aria-label="Chart legend"><span className="is-up">Up day</span><span className="is-down">Down day</span><span className="is-level">Reference levels</span>{selectedPattern && <span className="is-pattern">Selected pattern</span>}{milestones.length > 0 && <span>3M · 6M · 1Y observations</span>}<span className="is-signal">{displayedCount} pattern{displayedCount === 1 ? '' : 's'} in range</span><span>EMA20 · SMA50 · SMA200 · Volume</span></div>
+        <div className="price-chart__legend" aria-label="Chart legend"><span className="is-up">Up day</span><span className="is-down">Down day</span><span className="is-level">Reference levels</span>{focusedPattern?.shapes?.length > 0 && <span className="is-pattern">Pattern structure</span>}{milestones.length > 0 && <span>3M · 6M · 1Y observations</span>}<span className="is-signal">{visibleConfirmations.length} entry confirmation{visibleConfirmations.length === 1 ? '' : 's'}</span><span>EMA20 · SMA50 · SMA200 · Volume</span></div>
       </div>
     </figcaption>
-    <div ref={container} className="price-chart__canvas" aria-label="Interactive candlestick price chart" />
-    {displayedCount > 0 && <details className="chart-pattern-index"><summary>{displayedCount} detected pattern{displayedCount === 1 ? '' : 's'} shown on the chart</summary><ol>{detectionGroups.map(({ time, patterns }) => <li key={time}><time dateTime={time}>{formatMarketDate(time)}</time><span>{patterns.map((item) => `${item.variant || item.patternType} · ${item.state}`).join(', ')}</span></li>)}</ol></details>}
-    {milestones.length > 0 && <details open><summary>Forward performance observation dates</summary><ol>{milestones.map((item) => <li key={item.label}><time dateTime={item.date}>{formatMarketDate(item.date)}</time> · {item.label} · {item.returnPct == null ? 'Not yet available' : `${Number(item.returnPct) >= 0 ? '+' : ''}${Number(item.returnPct).toFixed(1)}%`}{item.complete ? '' : ' (partial window)'}</li>)}</ol></details>}
-    {corporateActions.length > 0 && <details><summary>{corporateActions.length} corporate action{corporateActions.length === 1 ? '' : 's'} in range</summary><ul>{corporateActions.map((action) => <li key={action.sourceEventKey}>{formatMarketDate(action.exDate)} · {action.actionType}{action.description ? ` · ${action.description}` : ''}</li>)}</ul></details>}
-    <details className="chart-data-table"><summary>Open accessible price summary</summary><div className="setup-table-wrap"><table><caption>Latest 20 adjusted daily bars in the selected range</caption><thead><tr><th scope="col">Date</th><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th><th scope="col">Close</th><th scope="col">Volume</th><th scope="col">EMA20</th><th scope="col">SMA50</th><th scope="col">SMA200</th></tr></thead><tbody>{candles.slice(-20).reverse().map((bar) => <tr key={bar.date}><th scope="row">{formatMarketDate(bar.date)}</th><td>{formatPrice(bar.open)}</td><td>{formatPrice(bar.high)}</td><td>{formatPrice(bar.low)}</td><td>{formatPrice(bar.close)}</td><td>{formatCompactNumber(bar.volume)}</td><td>{formatPrice(bar.ema20)}</td><td>{formatPrice(bar.sma50)}</td><td>{formatPrice(bar.sma200)}</td></tr>)}</tbody></table></div></details>
+    <div ref={container} className="price-chart__canvas" role="img" aria-label={chartDescription} />
   </figure>
 }

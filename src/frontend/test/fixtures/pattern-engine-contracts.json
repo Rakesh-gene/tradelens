@@ -7,6 +7,29 @@
       "requestId": "req_fixture"
     }
   },
+  "overview": {
+    "dataAsOf": "2026-09-04",
+    "generatedAt": "2026-09-04T13:15:00Z",
+    "engineVersion": "1.0.0",
+    "configurationVersion": "2026-09-01",
+    "isStale": false,
+    "pipeline": {},
+    "market": {},
+    "countsByState": {},
+    "topSetups": [],
+    "nextCursor": null,
+    "qualification": {
+      "policyVersion": "overview-qualified-v1",
+      "configurationVersion": "fixture-policy-version",
+      "candidateCount": 0,
+      "qualifiedCount": 0,
+      "dataAsOf": "2026-09-04",
+      "peerScope": "eligibleOverviewEquitiesWithinLifecycleState",
+      "thresholds": { "minimumPeerPercentile": 80, "minimumBestFitScore": 70, "minimumQualityScore": 70, "minimumContextScore": 40, "requiredLiquidityScore": 100 },
+      "states": ["READY", "TRIGGERED", "CONFIRMED"],
+      "summary": "Qualification rule summary"
+    }
+  },
   "freshness": {
     "dataAsOf": "2026-09-04",
     "generatedAt": "2026-09-04T13:15:00Z",
@@ -72,6 +95,15 @@
     "to": "2026-09-04",
     "adjusted": true,
     "priceScale": "linear",
+    "focusedPatternId": "2a9ca55f-3d2d-4b25-b683-36979029fb97",
+    "patternAnnotations": [{
+      "patternInstanceId": "2a9ca55f-3d2d-4b25-b683-36979029fb97",
+      "patternType": "BASE-VCP", "variant": "VCP-3C", "state": "CONFIRMED", "direction": "BULLISH",
+      "confirmationDate": "2026-09-04", "confirmationPrice": 1501,
+      "startDate": "2026-08-03", "structureEndDate": "2026-09-03",
+      "geometryAvailable": true, "adjustmentVersion": "fixture-adjustment-v1",
+      "shapes": [{ "kind": "box", "label": "Base range", "startDate": "2026-08-03", "endDate": "2026-09-03", "upperPrice": 1490, "lowerPrice": 1420 }]
+    }],
     "bars": [{ "date": "2026-09-04", "open": 1490.0, "high": 1510.0, "low": 1482.0, "close": 1501.0, "volume": 1234567, "ema20": 1488.0, "sma50": 1440.0, "sma200": 1310.0 }],
     "levels": [],
     "events": [],

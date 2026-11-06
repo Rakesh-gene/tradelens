@@ -19,6 +19,10 @@ describe('DecisionSummary', () => {
     expect(screen.getByText(/Wait for a decisive close/)).toBeTruthy()
     expect(screen.getByText('Relative strength is leading the peer universe')).toBeTruthy()
     expect(screen.getByText(/not historical probability/)).toBeTruthy()
+    expect(screen.queryByText(decision.summary)).toBeNull()
+    expect(screen.queryByText('Ready', { exact: true })).toBeNull()
+    expect(screen.getByText('Evidence details').closest('details').open).toBe(false)
+    expect(screen.getAllByText('Trigger', { exact: true })).toHaveLength(1)
   })
 
   it('keeps compact decisions concise', () => {

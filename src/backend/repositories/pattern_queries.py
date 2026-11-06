@@ -14,6 +14,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from repositories.migrations import MigrationRunner
 from repositories.sector_rotation import SectorRotationQueries, MemorySectorRotationQueries
+from repositories.overview_queries import OVERVIEW_SETUPS_SQL
+from pattern_engine.overview_qualification import STATES
 
 
 _SORT_COLUMNS = {
@@ -26,6 +28,19 @@ _SORT_COLUMNS = {
 }
 
 
+def _latest_evidence_clause(as_of):
+    """Exclude retained evidence superseded by a newer security evaluation."""
+    return f"""NOT EXISTS (
+        SELECT 1 FROM pattern_instances newer
+        WHERE newer.isin = p.isin AND newer.last_updated_date > p.last_updated_date
+          AND newer.last_updated_date <= {as_of}
+    ) AND NOT EXISTS (
+        SELECT 1 FROM technical_features newer_feature
+        WHERE newer_feature.isin = p.isin AND newer_feature.trading_date > p.last_updated_date
+          AND newer_feature.trading_date <= {as_of}
+    )"""
+
+
 class PostgresPatternQueryRepository(SectorRotationQueries):
     def __init__(self, dsn: str, *, apply_migrations: bool = True) -> None:
         if psycopg is None:
@@ -36,6 +51,13 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
 
     def _connect(self):
         return psycopg.connect(self._dsn)
+
+    def overview_setups(self, as_of, policy, limit, offset):
+        rows = self._fetch_all(OVERVIEW_SETUPS_SQL.replace("__LATEST__", _latest_evidence_clause("%(as_of)s")),
+                               {"as_of": as_of, "states": list(STATES), "limit": limit + 1, "offset": offset, **policy.parameters()})
+        return {"items": [row for row in rows if row.get("id") is not None],
+                "candidateCount": int(rows[0]["candidate_count"]) if rows else 0,
+                "qualifiedCount": int(rows[0]["qualified_count"]) if rows else 0}
 
     def search_securities(self, query, limit):
         text = str(query).strip()
@@ -76,6 +98,8 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
         if filters.get("equities_only"):
             clauses.append("EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ')")
         parameters = {"as_of": filters["as_of"], "limit": limit + 1, "offset": offset}
+        if filters.get("latest_only"):
+            clauses.append(_latest_evidence_clause("%(as_of)s"))
         if filters.get("pattern_class"):
             clauses.append("p.pattern_class = %(pattern_class)s")
             parameters["pattern_class"] = filters["pattern_class"]
@@ -257,6 +281,7 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
         return self._fetch_all(statement, parameters)
 
     def setup_facets(self, as_of, equities_only=False):
+        latest_clause = f"AND {_latest_evidence_clause('%s')}" if equities_only else ""
         return {
             "states": self._facet("p.state", as_of, equities_only),
             "patternTypes": self._facet("p.pattern_type", as_of, equities_only),
@@ -264,7 +289,7 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             "directions": self._facet("p.direction", as_of, equities_only),
             "timeframes": self._facet("p.timeframe", as_of, equities_only),
             "sectors": self._fetch_all(
-                """
+                f"""
                 SELECT membership.sector_code AS value, sectors.name AS label, COUNT(*) AS count
                 FROM pattern_instances AS p
                 JOIN security_sector_memberships AS membership ON membership.isin = p.isin
@@ -273,14 +298,15 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                 JOIN market_sectors AS sectors ON sectors.code = membership.sector_code
                 WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL
                   AND (%s = FALSE OR EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ'))
+                  {latest_clause}
                 GROUP BY membership.sector_code, sectors.name ORDER BY count DESC, value
-                """, (as_of, as_of, as_of, equities_only),
+                """, (as_of, as_of, as_of, equities_only) + ((as_of, as_of) if equities_only else ()),
             ),
         }
 
     def overview_summary(self, as_of):
         return self._fetch_one(
-            """
+            f"""
             WITH requested_date AS (
                 SELECT COALESCE(%s, MAX(last_updated_date)) AS value FROM pattern_instances
             ), latest_features AS (
@@ -332,6 +358,7 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
                 JOIN nse_equities equity ON equity.isin = p.isin AND equity.series = 'EQ'
                 CROSS JOIN selected_date
                 WHERE p.last_updated_date <= selected_date.value
+                  AND {_latest_evidence_clause('selected_date.value')}
                   AND p.terminal_date IS NULL
                   AND p.pattern_group = 'SETUP'
                   AND p.timeframe = '1D'
@@ -539,9 +566,9 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
     def list_chart_patterns(self, isin, as_of, start_date, limit=500):
         return self._fetch_all(
             """SELECT * FROM pattern_instances
-               WHERE isin = %s AND detected_date >= %s AND detected_date <= %s
-               ORDER BY detected_date, id LIMIT %s""",
-            (isin, start_date, as_of, limit),
+               WHERE isin = %s AND (detected_date BETWEEN %s AND %s OR confirmation_date BETWEEN %s AND %s)
+               ORDER BY COALESCE(confirmation_date, detected_date) DESC, id LIMIT %s""",
+            (isin, start_date, as_of, start_date, as_of, limit),
         )
 
     def list_security_events(self, isin, as_of, limit=25):
@@ -558,9 +585,10 @@ class PostgresPatternQueryRepository(SectorRotationQueries):
             "p.state", "p.pattern_type", "p.pattern_group", "p.direction", "p.timeframe",
         }:
             raise ValueError("Unsupported facet")
+        latest_clause = f"AND {_latest_evidence_clause('%s')}" if equities_only else ""
         return self._fetch_all(
-            f"SELECT {column} AS value, COUNT(*) AS count FROM pattern_instances p WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL AND (%s = FALSE OR EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ')) GROUP BY {column} ORDER BY count DESC, value",
-            (as_of, equities_only),
+            f"SELECT {column} AS value, COUNT(*) AS count FROM pattern_instances p WHERE p.last_updated_date <= %s AND p.terminal_date IS NULL AND (%s = FALSE OR EXISTS (SELECT 1 FROM nse_equities eligible WHERE eligible.isin = p.isin AND eligible.series = 'EQ')) {latest_clause} GROUP BY {column} ORDER BY count DESC, value",
+            (as_of, equities_only) + ((as_of, as_of) if equities_only else ()),
         )
 
     def _fetch_one(self, statement, parameters):
@@ -589,6 +617,32 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         self.index_bars = [dict(value) for value in index_bars]
         self.run = dict(run or {})
 
+    def overview_setups(self, as_of, policy, limit, offset):
+        filters = {"as_of": as_of, "states": STATES, "equities_only": True, "latest_only": True,
+                   "timeframe": "1D", "pattern_group": "SETUP", "sort": "bestFit", "direction": "desc",
+                   "overview_cohort": True}
+        rows = self.list_setups(filters, len(self.patterns), 0)
+        for row in rows:
+            peers = [item for item in rows if item["state"] == row["state"]]
+            ordered = sorted(peers, key=lambda item: (-item["best_fit_score"], -_decimal(item.get("setup_score")), str(item["id"])))
+            row["best_fit_rank"] = next(index for index, item in enumerate(ordered, 1) if item["id"] == row["id"])
+            row["best_fit_percentile_raw"] = Decimal("100") if len(peers) == 1 else (
+                Decimal(sum(item["best_fit_score"] < row["best_fit_score"] for item in peers)) / (len(peers) - 1) * 100)
+            row["best_fit_percentile"] = row["best_fit_percentile_raw"].quantize(Decimal("0.1"))
+            feature = next((item for item in self.features if item.get("isin") == row["isin"]
+                            and item.get("trading_date") == as_of and item.get("feature_version") == row.get("feature_version")
+                            and item.get("data_version") == row.get("adjustment_version")), {})
+            bar = next((item for item in self.bars if item.get("isin") == row["isin"]
+                        and item.get("trading_date") == as_of and item.get("adjustment_version") == row.get("adjustment_version")), {})
+            row.update(feature_date=feature.get("trading_date"), price_date=bar.get("trading_date"),
+                       last_close=bar.get("close_price"), relative_strength_6m=feature.get("relative_strength_6m"),
+                       relative_strength_percentile=feature.get("relative_strength_percentile"),
+                       liquidity_score=((row.get("measurements") or {}).get("scoring", {}).get("context_inputs", {}).get("liquidity")))
+            close, pivot = row.get("last_close"), row.get("pivot_price")
+            row["distance_to_pivot_pct"] = None if close is None or not pivot else (_decimal(close) - _decimal(pivot)) / _decimal(pivot) * 100
+        qualified = [row for row in rows if policy.accepts(row, as_of)]
+        return {"items": qualified[offset:offset + limit + 1], "candidateCount": len(rows), "qualifiedCount": len(qualified)}
+
     def search_securities(self, query, limit):
         text = str(query).strip().casefold()
         rows = [
@@ -610,7 +664,10 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
             for row in self.patterns
             if row["last_updated_date"] <= filters["as_of"]
             and (not filters.get("equities_only") or self.securities.get(str(row["isin"]), {}).get("series", "EQ") == "EQ")
+            and (not filters.get("overview_cohort") or (row.get("terminal_date") is None and str(row["isin"]) in self.securities))
         ]
+        if filters.get("latest_only"):
+            rows = [row for row in rows if self._is_latest_evidence(row, filters["as_of"])]
         checks = {
             "pattern_class": "pattern_class", "pattern_type": "pattern_type",
             "variant": "variant", "sector": "sector_code",
@@ -626,7 +683,8 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         if filters.get("min_liquidity_score") is not None:
             rows = [row for row in rows if _decimal(((row.get("measurements") or {}).get("scoring", {}).get("context_inputs", {}).get("liquidity"))) >= filters["min_liquidity_score"]]
         grouped = {}
-        for row in sorted(rows, key=lambda row: (_state_rank(row.get("state")), _class_rank(row.get("pattern_class")), -_decimal(row.get("setup_score")), str(row.get("id")))):
+        for row in sorted(rows, key=lambda row: (_state_rank(row.get("state")), _class_rank(row.get("pattern_class")), -_decimal(row.get("setup_score")),
+                                                -(row.get("detected_date") or date.min).toordinal() if filters.get("overview_cohort") else 0, str(row.get("id")))):
             grouped.setdefault(row.get("isin"), row)
         rows = list(grouped.values())
         for row in rows:
@@ -660,11 +718,23 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
             row["total_count"] = len(rows)
         return rows[offset:offset + limit + 1]
 
+    def _is_latest_evidence(self, row, as_of):
+        return not any(
+            candidate.get("isin") == row.get("isin")
+            and row["last_updated_date"] < candidate.get(field) <= as_of
+            for candidates, field in ((self.patterns, "last_updated_date"), (self.features, "trading_date"))
+            for candidate in candidates
+        )
+
     def setup_facets(self, as_of, equities_only=False):
         def counts(field):
             values = {}
             for row in self.patterns:
                 if equities_only and self.securities.get(str(row["isin"]), {}).get("series", "EQ") != "EQ":
+                    continue
+                if row["last_updated_date"] > as_of or row.get("terminal_date") is not None:
+                    continue
+                if equities_only and not self._is_latest_evidence(row, as_of):
                     continue
                 values[row.get(field)] = values.get(row.get(field), 0) + 1
             return [{"value": key, "count": value} for key, value in values.items() if key]
@@ -683,6 +753,7 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
             self._joined(row, selected)
             for row in self.patterns
             if row.get("last_updated_date") <= selected
+            and self._is_latest_evidence(row, selected)
             and row.get("terminal_date") is None
             and (row.get("pattern_group") or "SETUP") == "SETUP"
             and (row.get("timeframe") or "1D") == "1D"
@@ -751,7 +822,10 @@ class InMemoryPatternQueryRepository(MemorySectorRotationQueries):
         rows = [row for row in self.features if row.get("isin") == isin and row.get("trading_date") <= as_of]
         return max(rows, key=lambda row: row["trading_date"], default=None)
     def list_security_patterns(self, isin, as_of, limit=50): return [row for row in self.patterns if row.get("isin") == isin and row.get("detected_date") <= as_of][:limit]
-    def list_chart_patterns(self, isin, as_of, start_date, limit=500): return sorted([row for row in self.patterns if row.get("isin") == isin and start_date <= row.get("detected_date") <= as_of], key=lambda row: (row.get("detected_date"), str(row.get("id"))))[:limit]
+    def list_chart_patterns(self, isin, as_of, start_date, limit=500):
+        rows = [row for row in self.patterns if row.get("isin") == isin and any(
+            row.get(key) is not None and start_date <= row[key] <= as_of for key in ("detected_date", "confirmation_date"))]
+        return sorted(rows, key=lambda row: (-(row.get("confirmation_date") or row["detected_date"]).toordinal(), str(row.get("id"))))[:limit]
     def list_security_events(self, isin, as_of, limit=25):
         ids = {str(row.get("id")) for row in self.patterns if row.get("isin") == isin}
         return [row for row in self.events if str(row.get("pattern_instance_id")) in ids and row.get("effective_date") <= as_of][:limit]

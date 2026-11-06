@@ -1,0 +1,10 @@
+@prefix tl: <urn:tradelens:ontology:> .
+tl:DETECTED a tl:LifecycleState ; tl:canonicalCode "DETECTED" .
+tl:FORMING a tl:LifecycleState ; tl:canonicalCode "FORMING" .
+tl:MATURE a tl:LifecycleState ; tl:canonicalCode "MATURE" .
+tl:READY a tl:LifecycleState ; tl:canonicalCode "READY" .
+tl:TRIGGERED a tl:LifecycleState ; tl:canonicalCode "TRIGGERED" .
+tl:CONFIRMED a tl:LifecycleState ; tl:canonicalCode "CONFIRMED" .
+tl:FAILED a tl:LifecycleState ; tl:canonicalCode "FAILED" .
+tl:INVALIDATED a tl:LifecycleState ; tl:canonicalCode "INVALIDATED" .
+tl:EXPIRED a tl:LifecycleState ; tl:canonicalCode "EXPIRED" .

@@ -1,6 +1,30 @@
 # Positional Trading Pattern Engine — Client and API Integration Plan
 
 - **Plan version:** 1.0
+- **Global version-label policy (2026-11-06):** Engine, configuration, feature
+  and adjustment version values are retained in server contracts but never
+  rendered in the UI, including security pages, case studies and AI responses.
+  Evidence dates, stale/partial indicators and domain warnings remain visible.
+- **Current setup-detail presentation (2026-11-06):** Show identity/evidence date,
+  chart first, concise decision intelligence second, and a compact latest-symbol
+  link at the bottom. Remove the Similar case studies card, detailed evidence/
+  scores/lifecycle disclosure and engine/configuration/feature/adjustment labels
+  from this page. Retain backend evidence and lineage; do not fetch unused events.
+- **Chat widget slice:** `components/chat/ChatWidget.jsx` mounts once in the
+  authenticated AppShell and opens a native modal overlay without a route or
+  History API change. It supports only the current equity's daily primary setup
+  through bearer-protected `GET /api/chat/capabilities` and
+  `POST /api/chat/messages`. Actual evidence dates, nulls and stale/partial
+  warnings are rendered from the server. Setup: `infra/ontology/README.md`.
+  The composer accepts a 4,000-character natural question naming an equity;
+  no separate symbol field is shown. Administrators use Settings in the overlay
+  to configure Ollama (default `gemma4:31b-cloud`), optional Gemini, and Ontop
+  via `/api/admin/chat/configuration` (GET/PATCH). Ollama exposes its endpoint
+  instead of an API key. Free-form wording is accepted without a prompt whitelist.
+  Saving applies settings immediately; API keys are never returned to clients.
+  Model socket timeout is configurable (5–120 seconds, default 45). When the
+  model is unavailable after validated Ontop retrieval, show the graph evidence
+  with an explicit `ontologyEvidenceOnly` provenance mode, null model and warning.
 - **Sector rotation extension:** Protected `/sector-rotation` renders the
   accessible quadrant and equivalent sector buttons. `GET /api/sectors/rotation?asOf=YYYY-MM-DD` returns
   standard freshness/version metadata, methodology and `items` with `code`,
@@ -21,6 +45,20 @@
 - **Design system:** `src/frontend/src/topology.css`
 
 ## 1. Purpose
+
+Pattern detail remains a reproducible setup snapshot: its chart, close and
+evidence are bounded by `lastUpdatedDate`. The detail response includes
+`dataAsOf`, nullable `latestDataAsOf` (latest available security feature date),
+`hasNewerData`, `generatedAt`, `engineVersion`, `configurationVersion`, and
+`isStale`. Label the snapshot date as "Setup evidence as of", announce newer
+available data, and link to `/securities/:symbol` for the current chart and
+signals. Never replace historical setup evidence with current measurements.
+
+Setups and Overview top setups exclude retained patterns when a newer pattern
+evaluation or feature session exists for that security at or before the
+requested date. Apply this server-side before filters, ranking and pagination;
+Setups facets and Overview active counts use the same eligibility rule. Old
+setup IDs remain accessible as explicitly dated evidence.
 
 This document defines the client-side implementation of the positional trading
 pattern engine. It describes the pages, components, state, API contracts,
@@ -432,7 +470,24 @@ Authorization: Bearer <token>
 ```
 
 `asOf` is optional and defaults to the latest completed engine date. `top` is
-bounded by the server.
+bounded by the server (1–25, default 10). The Overview page requests six results
+per batch. Optional `cursor` is opaque; send the previous response's `nextCursor`
+with the same `top` and initial `dataAsOf` as `asOf` to append the next batch.
+Ranking, active-state filters, latest-evidence eligibility and one result per
+equity remain server-owned. A null `nextCursor` marks the last page.
+
+Overview returns only `overview-qualified-v1` results, never the full eligible
+universe. Its `qualification` object contains `policyVersion`, a separate policy
+`configurationVersion`, `candidateCount`, `qualifiedCount`, `dataAsOf`,
+`peerScope`, `states`, camelCase numeric `thresholds`, and a server-authored
+`summary`. Each setup adds `overviewQualification`: policy/configuration versions,
+actual `values` (`bestFit`, `peerPercentile`, `quality`, `context`, `liquidity`),
+`evaluationDate`, `featureDate`, `priceDate`, and `riskValid`.
+The client displays "Showing N of M qualified setups". The rule summary,
+Why it qualifies disclosure and Incomplete evidence text are hidden on Overview
+by product decision; the server retains qualification metadata and filtering.
+The client does not calculate qualification.
+See `overview_setup_qualification_plan.md` for accepted thresholds and lineage.
 
 ### Response shape
 
@@ -485,7 +540,19 @@ bounded by the server.
     "CONFIRMED": 9,
     "FAILED": 4
   },
-  "topSetups": []
+  "topSetups": [],
+  "nextCursor": null,
+  "qualification": {
+    "policyVersion": "overview-qualified-v1",
+    "configurationVersion": "policy-content-hash",
+    "candidateCount": 278,
+    "qualifiedCount": 0,
+    "dataAsOf": "2026-09-04",
+    "peerScope": "eligibleOverviewEquitiesWithinLifecycleState",
+    "states": ["READY", "TRIGGERED", "CONFIRMED"],
+    "thresholds": {"minimumPeerPercentile": 80, "minimumBestFitScore": 70, "minimumQualityScore": 70, "minimumContextScore": 40, "requiredLiquidityScore": 100},
+    "summary": "Top 20% within each lifecycle state; best fit ≥ 70, quality ≥ 70, context ≥ 40; all liquidity checks pass, with current evidence and valid risk levels. Scores rank evidence, not probability."
+  }
 }
 ```
 
@@ -501,7 +568,10 @@ Replace the placeholder `OverviewPage` with:
 3. Market regime card with a compact label, a themed 63-session NIFTY 50 area
    chart, and a NIFTY 500 breadth section below it.
 4. Lifecycle count cards linking to prefiltered `/setups?state=READY`, etc.
-5. “Highest-ranked setups” list with a link to the complete screener.
+5. “Highest-ranked setups” list with a link to the complete screener and a
+   bottom Load more action that appends six results at a time until exhausted.
+   Keep existing cards visible during loading/errors, allow retry of the same
+   cursor, abort on unmount, and announce the loaded count.
 6. A concise disclosure: setup score is ranking evidence, not outcome
    probability or financial advice.
 
@@ -1196,6 +1266,36 @@ levels, supporting evidence, versions, and lifecycle transitions.
 technical classification.
 
 ### Client Phase 5 — Adjusted chart integration
+
+2026-11-06 annotation update: the shared chart marks recorded entry confirmations,
+not every pattern detection. `patternAnnotations` is supplied by pattern,
+security and case-study chart APIs. Each item contains `patternInstanceId`,
+`patternType`, `variant`, `state`, `direction`, nullable `confirmationDate`,
+nullable `confirmationPrice` (adjusted confirmation-session close, not an
+execution price), `startDate`, `structureEndDate`, `geometryAvailable`,
+`adjustmentVersion` and `shapes`. Boxes contain `startDate`, `endDate`,
+`upperPrice`, `lowerPrice`, and `label`; lines contain `label` and ordered
+`points` of `{date, price}`. All financial values come from the server.
+
+Draw only the selected pattern's structure. Security charts return
+`focusedPatternId` for the same current primary setup used by the fingerprint,
+including READY/forming bases. Include that primary even when its detection
+predates the selected chart window; clip its drawing to available prices without
+changing the recorded start date. Fall back to the most recent confirmation only
+when there is no active primary. Reference levels follow the focused structure.
+Base/retest zones use boxes, breakouts use bounded
+resistance lines, MA pullbacks use the relevant bounded server series, and daily
+reversal/harmonic pivots use dated polylines when evidence exists. Missing
+geometry is labelled instead of reconstructed. Weekly/monthly pivots do not
+reuse daily candle extrema. Entry confirmation requires a recorded date, never
+state/score inference. A previously confirmed failed pattern remains historical
+evidence and states its current recorded state. Multiple confirmations on one
+session share one chart marker.
+Canvas primitives redraw with the existing chart's zoom/scroll/resize lifecycle,
+and an accessible chart description retains the focused pattern, recorded state
+and confirmation status. The chart section contains only the chart, title,
+range control and legend; structure-value disclosures, price-summary tables
+and other below-chart detail panels are removed by product decision.
 
 **Status: Complete — 2026-09-09.** The existing `lightweight-charts`
 decision is retained instead of introducing a second SVG chart renderer.
